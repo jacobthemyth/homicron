@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck bats
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck bats libxml2-utils
       - run: test/lint.sh
       - run: test/run-tests.sh
 
