@@ -39,8 +39,16 @@ fi
 rm -rf "$out"
 mkdir -p "$out/firstboot"
 
+# A sed replacement reads & (the match), | (our delimiter), and \ specially;
+# a URL can hold the first two.
+sed_escape() {
+  printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'
+}
+base_url_esc=$(sed_escape "$base_url")
+repo_url_esc=$(sed_escape "$repo_url")
+
 # One line of install.sh changes: the default inside base_url=${...:-...}.
-sed -e "s|^base_url=\${HOMICRON_BASE_URL:-.*}\$|base_url=\${HOMICRON_BASE_URL:-$base_url}|" "$root/install/install.sh" > "$out/install"
+sed -e "s|^base_url=\${HOMICRON_BASE_URL:-.*}\$|base_url=\${HOMICRON_BASE_URL:-$base_url_esc}|" "$root/install/install.sh" > "$out/install"
 cp "$root"/firstboot/* "$out/firstboot/"
 
 (
@@ -48,7 +56,7 @@ cp "$root"/firstboot/* "$out/firstboot/"
   sum_tool install firstboot/* > SHA256SUMS
 )
 
-sed -e "s|{{BASE_URL}}|$base_url|g" -e "s|{{REPO_URL}}|$repo_url|g" "$root/pages/index.html" > "$out/index.html"
+sed -e "s|{{BASE_URL}}|$base_url_esc|g" -e "s|{{REPO_URL}}|$repo_url_esc|g" "$root/pages/index.html" > "$out/index.html"
 cp "$root/pages/.nojekyll" "$out/"
 
 printf 'site built in %s\n' "$out"

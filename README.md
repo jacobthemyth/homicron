@@ -91,7 +91,13 @@ The published site at https://homicron.smithjs.org works for anyone, because the
 3. If you want a custom domain, point a DNS CNAME record at `<owner>.github.io` and run:
 
    ```
-   gh api -X PUT repos/<owner>/<repo>/pages -f cname=<domain> -F https_enforced=true
+   gh api -X PUT repos/<owner>/<repo>/pages -f cname=<domain>
+   ```
+
+   GitHub then issues a certificate for the domain, which takes a few minutes. Once `gh api repos/<owner>/<repo>/pages --jq .https_certificate.state` prints `approved`, turn on HTTPS:
+
+   ```
+   gh api -X PUT repos/<owner>/<repo>/pages -F https_enforced=true
    ```
 
    GitHub reads the domain from this setting. The deploy workflow learns the site address from GitHub, so no file in the repository names it.

@@ -9,14 +9,23 @@ setup() {
   if [[ -f $BIN ]]; then cp "$BIN" "$REPO/bin/homicron"; fi
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME/.ssh"
-  printf 'ssh-ed25519 AAAA workstation\n' > "$HOME/.ssh/id_ed25519.pub"
+  printf 'ssh-ed25519 AAAAC3one workstation\n' > "$HOME/.ssh/id_ed25519.pub"
   unset HOMICRON_KEYS
   printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\nHOMICRON_PORT=2222\n' > "$REPO/hosts/box.env"
   printf '#!/bin/bash\n' > "$REPO/host/10-a.sh"
   printf '#!/bin/bash\n' > "$REPO/host/20-b.sh"
   make_fake rsync
   make_fake ssh
-  export HOMICRON_POLL_SECONDS=0 HOMICRON_REBOOT_TIMEOUT=1 HOMICRON_REBOOT_GRACE=0
+  # The reboot wait reads the clock through date +%s and waits with sleep.
+  # Both are faked: sleep advances a counter file, date prints it, so the
+  # tests never wait and every timing is deterministic.
+  export CLOCK="$BATS_TEST_TMPDIR/clock"
+  printf '1000000\n' > "$CLOCK"
+  make_fake sleep
+  printf 'printf "%%s\\n" "$(( $(cat "$CLOCK") + ${1%%.*} ))" > "$CLOCK"; exit 0\n' > "$FAKE_BIN/sleep.script"
+  make_fake date
+  printf 'cat "$CLOCK"\n' > "$FAKE_BIN/date.script"
+  export HOMICRON_POLL_SECONDS=5 HOMICRON_REBOOT_TIMEOUT=30 HOMICRON_REBOOT_GRACE=10
   unset HOMICRON_ADDR
 }
 
@@ -97,7 +106,7 @@ EOS
 @test "an unchanged boot time means the reboot was lost; it is sent again" {
   cat > "$FAKE_BIN/ssh.script" <<'EOS'
 case "$*" in
-  *kstat*) n=$(grep -c 'kstat' "$FAKE_LOG"); if (( n <= 2 )); then t=1000; else t=1001; fi; printf 'unix:0:system_misc:boot_time\t%s\n' "$t"; exit 0 ;;
+  *kstat*) n=$(grep -c 'kstat' "$FAKE_LOG"); if (( n <= 3 )); then t=1000; else t=1001; fi; printf 'unix:0:system_misc:boot_time\t%s\n' "$t"; exit 0 ;;
   *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
   *) exit 0 ;;
 esac
@@ -107,6 +116,8 @@ EOS
   [ "$(fake_calls | grep -c 'reboot$')" -eq 2 ]
   [[ "$output" == *"has not rebooted yet"* ]]
   [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
+  # polls at 5, 10 (resend), 15: three waits of the poll interval
+  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 3 ]
 }
 
 @test "within the grace period an unchanged boot time does not resend reboot" {
@@ -119,8 +130,10 @@ esac
 EOS
   HOMICRON_REBOOT_GRACE=60 run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot reach box.local after reboot"* ]]
+  [[ "$output" == *"cannot reach box.local after reboot (30s)"* ]]
   [ "$(fake_calls | grep -c 'reboot$')" -eq 1 ]
+  # 30 s of timeout at 5 s a poll: six waits, then the deadline
+  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 6 ]
 }
 
 @test "a failing kstat still reboots, waits for ssh to drop and return, and reruns the step" {
@@ -142,14 +155,16 @@ EOS
   cat > "$FAKE_BIN/ssh.script" <<'EOS'
 case "$*" in
   *kstat*) exit 1 ;;
-  *root@box.local\ true) n=$(grep -c 'reboot$' "$FAKE_LOG"); if (( n >= 2 )); then exit 255; else exit 0; fi ;;
+  *root@box.local\ true) n=$(grep -c 'reboot$' "$FAKE_LOG"); t=$(grep -c 'true$' "$FAKE_LOG"); if (( n >= 2 && t <= 3 )); then exit 255; else exit 0; fi ;;
   *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
   *) exit 0 ;;
 esac
 EOS
-  HOMICRON_REBOOT_TIMEOUT=2 run "$REPO/bin/homicron" apply box
-  [ "$(fake_calls | grep -c 'reboot$')" -ge 2 ]
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c 'reboot$')" -eq 2 ]
   [[ "$output" == *"has not rebooted yet"* ]]
+  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
 }
 
 @test "an unknown variable in the hosts file exits 2 with the line number before rsync" {
@@ -239,15 +254,16 @@ EOS
 }
 
 @test "by default the shipped keys are every ~/.ssh/*.pub, each ending in a newline, certificates skipped" {
-  printf 'ssh-rsa BBBB second' > "$HOME/.ssh/id_rsa.pub"
-  printf 'ssh-ed25519-cert-v01@openssh.com CCCC cert\n' > "$HOME/.ssh/id_ed25519-cert.pub"
+  printf 'ssh-rsa AAAAB3two second' > "$HOME/.ssh/id_rsa.pub"
+  printf 'ssh-ed25519-cert-v01@openssh.com AAAAcert cert\n' > "$HOME/.ssh/id_ed25519-cert.pub"
   capture_sent
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BATS_TEST_TMPDIR/sent.keys" | tr -d ' ')" -eq 2 ]
-  grep -qx 'ssh-ed25519 AAAA workstation' "$BATS_TEST_TMPDIR/sent.keys"
-  grep -qx 'ssh-rsa BBBB second' "$BATS_TEST_TMPDIR/sent.keys"
-  ! grep -q CCCC "$BATS_TEST_TMPDIR/sent.keys"
+  grep -qx 'ssh-ed25519 AAAAC3one workstation' "$BATS_TEST_TMPDIR/sent.keys"
+  grep -qx 'ssh-rsa AAAAB3two second' "$BATS_TEST_TMPDIR/sent.keys"
+  ! grep -q AAAAcert "$BATS_TEST_TMPDIR/sent.keys"
+  [[ "$output" == *'shipping 2 keys from ~/.ssh/*.pub'* ]]
 }
 
 @test "no ~/.ssh/*.pub and no HOMICRON_KEYS exits 2 before rsync" {
@@ -260,22 +276,24 @@ EOS
 }
 
 @test "HOMICRON_KEYS as a path ships that file" {
-  printf 'ssh-ed25519 DDDD shared\n' > "$BATS_TEST_TMPDIR/shared.keys"
+  printf 'ssh-ed25519 AAAAshared shared\n' > "$BATS_TEST_TMPDIR/shared.keys"
   printf 'HOMICRON_KEYS=%s\n' "$BATS_TEST_TMPDIR/shared.keys" >> "$REPO/hosts/box.env"
   capture_sent
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
   cmp "$BATS_TEST_TMPDIR/sent.keys" "$BATS_TEST_TMPDIR/shared.keys"
   ! grep -q '^HOMICRON_KEYS=' "$BATS_TEST_TMPDIR/sent.env"
+  [[ "$output" == *"shipping 1 key from $BATS_TEST_TMPDIR/shared.keys"* ]]
 }
 
 @test "HOMICRON_KEYS as a URL is fetched with curl and shipped" {
-  make_fake curl 0 'ssh-ed25519 EEEE fetched'
+  make_fake curl 0 'ssh-ed25519 AAAAfetched fetched'
   capture_sent
   HOMICRON_KEYS=https://github.com/user.keys run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
   assert_called '^curl .*https://github.com/user.keys$'
-  grep -qx 'ssh-ed25519 EEEE fetched' "$BATS_TEST_TMPDIR/sent.keys"
+  grep -qx 'ssh-ed25519 AAAAfetched fetched' "$BATS_TEST_TMPDIR/sent.keys"
+  [[ "$output" == *'shipping 1 key from https://github.com/user.keys'* ]]
 }
 
 @test "a keys URL that cannot be fetched exits 2 before rsync" {
@@ -300,7 +318,7 @@ EOS
   capture_sent
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
-  grep -qx 'ssh-ed25519 AAAA workstation' "$BATS_TEST_TMPDIR/sent.keys"
+  grep -qx 'ssh-ed25519 AAAAC3one workstation' "$BATS_TEST_TMPDIR/sent.keys"
 }
 
 @test "a keys source with a line that is not a key exits 2 with the line number" {
@@ -322,5 +340,23 @@ EOS
   HOMICRON_KEYS="$BATS_TEST_TMPDIR/empty.keys" run "$REPO/bin/homicron" apply box
   [ "$status" -eq 2 ]
   [[ "$output" == *"no key line"* ]]
+  refute_called '^rsync'
+}
+
+@test "a relative HOMICRON_KEYS path resolves from the current directory" {
+  printf 'ssh-ed25519 AAAArel relative\n' > "$BATS_TEST_TMPDIR/rel.keys"
+  capture_sent
+  cd "$BATS_TEST_TMPDIR"
+  HOMICRON_KEYS=rel.keys run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/sent.keys" "$BATS_TEST_TMPDIR/rel.keys"
+}
+
+@test "a line with a key type but no real blob is not a key" {
+  printf 'Use ssh-keygen to make a key\nssh-rsa not=base64 x\n' > "$BATS_TEST_TMPDIR/prose.keys"
+  HOMICRON_KEYS="$BATS_TEST_TMPDIR/prose.keys" run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"line 1 is not a public key"* ]]
+  [[ "$output" == *"line 2 is not a public key"* ]]
   refute_called '^rsync'
 }

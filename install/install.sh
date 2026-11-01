@@ -44,7 +44,8 @@ sum_of() {
 # A key line has a key type field followed by a base64 field, after any
 # options such as from="...". sshd accepts sk- types and ecdsa- types too.
 type_re='^(sk-)?(ssh|ecdsa)-[A-Za-z0-9.@-]+$'
-blob_re='^[A-Za-z0-9+/=]+$'
+# Every OpenSSH blob starts with AAAA: the base64 of the length prefix.
+blob_re='^AAAA[A-Za-z0-9+/]+=*$'
 
 is_key_line() {
   local -a f
@@ -177,7 +178,8 @@ if grep -q '^nameserver' "$ramdisk_resolv" 2>/dev/null; then
   chmod 0644 "$altroot/etc/resolv.conf"
 fi
 
-printf 'HOSTNAME=%s\nKEYS_URL=%s\n' "$hostname" "$keys_url" > "$altroot/etc/homicron.conf"
+# %q: the first-boot service sources this file, and a URL can hold & or $.
+printf 'HOSTNAME=%s\nKEYS_URL=%q\n' "$hostname" "$keys_url" > "$altroot/etc/homicron.conf"
 chmod 0644 "$altroot/etc/homicron.conf"
 
 #

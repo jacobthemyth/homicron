@@ -51,3 +51,10 @@ setup() { OUT="$BATS_TEST_TMPDIR/site"; }
   [ -f "$copy/install/install.sh" ]
   run "$copy/pages/build-site.sh" "$BATS_TEST_TMPDIR/copy/out"; [ "$status" -eq 0 ]
 }
+
+@test "an ampersand or a pipe in the URLs survives the substitution" {
+  HOMICRON_BASE_URL='http://e.test/?a=1&b=2' HOMICRON_REPO_URL='https://e.test/o|r' "$SCRIPT" "$OUT"
+  grep -qxF 'base_url=${HOMICRON_BASE_URL:-http://e.test/?a=1&b=2}' "$OUT/install"
+  grep -qF 'http://e.test/?a=1&b=2/install' "$OUT/index.html"
+  grep -qF 'https://e.test/o|r' "$OUT/index.html"
+}

@@ -8,8 +8,8 @@
 # <name> selects hosts/<name>.env. A variable already set in the environment
 # wins over the file, so private addresses never need to be committed.
 #
-# HOMICRON_KEYS names the public keys to install, as a URL or an absolute
-# path. Unset, the runner ships every ~/.ssh/*.pub on this machine.
+# HOMICRON_KEYS names the public keys to install, as a URL or a file path.
+# Unset, the runner ships every ~/.ssh/*.pub on this machine.
 #
 set -o errexit -o pipefail -o nounset
 
@@ -65,7 +65,8 @@ known_var() {
 # A key line has a key type field followed by a base64 field, after any
 # options such as from="...". sshd accepts sk- types and ecdsa- types too.
 type_re='^(sk-)?(ssh|ecdsa)-[A-Za-z0-9.@-]+$'
-blob_re='^[A-Za-z0-9+/=]+$'
+# Every OpenSSH blob starts with AAAA: the base64 of the length prefix.
+blob_re='^AAAA[A-Za-z0-9+/]+=*$'
 
 is_key_line() {
   local -a f
@@ -83,6 +84,7 @@ is_key_line() {
 # key. Step 10 overwrites root's authorized_keys with this file, so a wrong
 # URL that returns an HTML page would lock the box: each bad line is named
 # and the file is refused.
+key_count=0
 check_keys_file() {
   local file="$1" line n=0 keys=0 bad=0
   while IFS= read -r line || [[ -n $line ]]; do
@@ -98,14 +100,16 @@ check_keys_file() {
   if (( bad == 0 && keys == 0 )); then
     printf '%s: keys: no key line (every line is blank or a comment)\n' "homicron" >&2
   fi
+  key_count=$keys
   (( bad == 0 && keys > 0 ))
 }
 
-# Write the keys to ship to OUT: HOMICRON_KEYS as a URL or an absolute path,
-# or every ~/.ssh/*.pub on this machine. Certificates (*-cert.pub) are not
+# Write the keys to ship to OUT: HOMICRON_KEYS as a URL or a file path, or
+# every ~/.ssh/*.pub on this machine. Certificates (*-cert.pub) are not
 # keys sshd accepts in authorized_keys and are skipped.
 collect_keys() {
-  local out="$1" src=${HOMICRON_KEYS-} f
+  local out="$1" src=${HOMICRON_KEYS-} f label
+  label=${src:-'~/.ssh/*.pub'}
   if [[ $src =~ ^https?:// ]]; then
     curl -fsSL "$src" > "$out" || die "cannot fetch keys from $src" 2
   elif [[ -n $src ]]; then
@@ -120,10 +124,18 @@ collect_keys() {
       awk 1 "$f" >> "$out"
     done
     if ! grep -Eq '^[[:space:]]*[^#[:space:]]' "$out"; then
-      die 'no public key in ~/.ssh/*.pub; set HOMICRON_KEYS to a URL or an absolute path' 2
+      die 'no public key in ~/.ssh/*.pub; set HOMICRON_KEYS to a URL or a file path' 2
     fi
   fi
   check_keys_file "$out" || die "refusing to ship a keys file that is not a usable authorized_keys file" 2
+  # The shipped file replaces every key on the box, so say what won.
+  printf 'shipping %d key%s from %s\n' "$key_count" "$([[ $key_count == 1 ]] || printf s)" "$label"
+}
+
+# The reboot wait reads the clock here and waits with sleep, so a test can
+# fake both commands and never wait.
+now() {
+  date +%s
 }
 
 #
@@ -219,12 +231,13 @@ boot_time() {
 # never reached the box, so it is sent again. A box without kstat falls back
 # to "ssh dropped, then works again".
 reboot_box() {
-  local before now sent went_down=no deadline=$(( SECONDS + reboot_timeout ))
+  local before after sent went_down=no deadline
+  deadline=$(( $(now) + reboot_timeout ))
   before=$(boot_time) || before=
   remote reboot || true
-  sent=$SECONDS
+  sent=$(now)
   while true; do
-    if (( SECONDS >= deadline )); then
+    if (( $(now) >= deadline )); then
       die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
     fi
     sleep "$poll"
@@ -235,17 +248,17 @@ reboot_box() {
       fi
       [[ $went_down == yes ]] && return 0
     else
-      now=$(boot_time) || continue
-      if [[ -n $now && $now != "$before" ]]; then
+      after=$(boot_time) || continue
+      if [[ -n $after && $after != "$before" ]]; then
         return 0
       fi
     fi
     # The box answers and has not rebooted. Give the reboot its grace period
     # before deciding it was lost.
-    (( SECONDS - sent < reboot_grace )) && continue
+    (( $(now) - sent < reboot_grace )) && continue
     printf 'box has not rebooted yet; sending reboot again\n'
     remote reboot || true
-    sent=$SECONDS
+    sent=$(now)
   done
 }
 

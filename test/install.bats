@@ -12,7 +12,7 @@ setup() {
   mkdir -p "$HOMICRON_ALTROOT/etc/svc" && : > "$HOMICRON_ALTROOT/etc/svc/repository.db"
   fake_site_setup "$BATS_TEST_TMPDIR/site"
   export HOMICRON_KEYS_URL=https://keys.test/user.keys FAKE_KEYS="$BATS_TEST_TMPDIR/user.keys"
-  printf 'ssh-ed25519 AAAA test\n' > "$FAKE_KEYS"
+  printf 'ssh-ed25519 AAAAC3test test\n' > "$FAKE_KEYS"
   make_fake install-helios
   make_fake diskinfo 0 $'SCSI\tc1t0d0\tVirtio\tBlock Device\t100.00 GiB\tno\tno\nNVME\tc2t0d0\tVirtio\tBlock Device\t100.00 GiB\tno\tno'
   make_fake svccfg
@@ -68,14 +68,14 @@ file_mode() {
 }
 
 @test "accepts a keys file whose only key is a hardware-backed sk- key" {
-  printf 'sk-ssh-ed25519@openssh.com AAAA test\n' > "$FAKE_KEYS"
+  printf 'sk-ssh-ed25519@openssh.com AAAAC3test test\n' > "$FAKE_KEYS"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 0 ]
   assert_called '^install-helios'
 }
 
 @test "an indented key line counts as a key" {
-  printf '  ssh-ed25519 AAAA indented\n' > "$FAKE_KEYS"
+  printf '  ssh-ed25519 AAAAC3test indented\n' > "$FAKE_KEYS"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 0 ]
   assert_called '^install-helios'
@@ -159,7 +159,7 @@ file_mode() {
 }
 
 @test "a keys file with a line that is not a key exits 1 with the line number" {
-  printf 'ssh-ed25519 AAAA ok\n<html><body>Not Found</body></html>\n' > "$FAKE_KEYS"
+  printf 'ssh-ed25519 AAAAC3ok ok\n<html><body>Not Found</body></html>\n' > "$FAKE_KEYS"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 1 ]
   [[ "$output" == *"line 2 is not a public key"* ]]
@@ -174,14 +174,30 @@ file_mode() {
 }
 
 @test "a keys file without a trailing newline keeps its last key" {
-  printf 'ssh-ed25519 AAAA one\nssh-ed25519 BBBB two' > "$FAKE_KEYS"
+  printf 'ssh-ed25519 AAAAone one\nssh-ed25519 AAAAtwo two' > "$FAKE_KEYS"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 0 ]
-  grep -q 'BBBB two' "$HOMICRON_ALTROOT/root/.ssh/authorized_keys"
+  grep -q 'AAAAtwo two' "$HOMICRON_ALTROOT/root/.ssh/authorized_keys"
 }
 
 @test "the site keys path is never fetched" {
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 0 ]
   refute_called 'keys/authorized_keys'
+}
+
+@test "KEYS_URL in homicron.conf sources back to the typed URL, shell characters included" {
+  export HOMICRON_KEYS_URL='https://keys.test/u.keys?a=1&b=$(x)'
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 0 ]
+  got=$(bash -c "source '$HOMICRON_ALTROOT/etc/homicron.conf' && printf '%s' \"\$KEYS_URL\"")
+  [ "$got" = "$HOMICRON_KEYS_URL" ]
+}
+
+@test "a line with a key type but no real blob is not a key" {
+  printf 'ssh-ed25519 AAAAone ok\nUse ssh-keygen to make a key\n' > "$FAKE_KEYS"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"line 2 is not a public key"* ]]
+  refute_called '^install-helios'
 }
