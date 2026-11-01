@@ -107,6 +107,23 @@ EOS
   grep -qx 'FALCON_DATASET=' "$BATS_TEST_TMPDIR/sent.env"
 }
 
+@test "malformed hosts lines exit 2 with the line number before rsync" {
+  for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r'; do
+    printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
+    run "$REPO/bin/homicron" apply bad
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"bad.env line 3"* ]]
+  done
+  refute_called '^rsync'
+}
+
+@test "a value from the environment with shell characters exits 2 before rsync" {
+  HOMICRON_ADDR='box.lan # lab' run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"HOMICRON_ADDR"* ]]
+  refute_called '^rsync'
+}
+
 @test "rsync failing to connect reports unreachable and never runs a step" {
   make_fake rsync 255
   run "$REPO/bin/homicron" apply box
