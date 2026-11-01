@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homicron</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 44rem; margin: 3rem auto; padding: 0 1rem; color: #222; }
+  pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; }
+  code { font-size: 0.95em; }
+  h1 { font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>homicron</h1>
+<p>homicron installs <a href="https://github.com/oxidecomputer/helios">Helios</a> on a bare-metal x86 machine and prepares it to run <a href="https://github.com/oxidecomputer/voxel">voxel</a>.</p>
+
+<h2>Install</h2>
+<p>Boot the stock Helios installer ISO. At its root prompt, find the NIC with <code>dladm show-phys</code> and the disk with <code>diskinfo</code>, then type:</p>
+<pre><code>ipadm create-addr -T dhcp rge0/v4 &amp;&amp; curl -fsSL https://homicron.smithjs.org/install | bash -s -- &lt;hostname&gt; &lt;disk&gt;</code></pre>
+<p>When it prints <code>install complete</code>, remove the media and run <code>reboot</code>.</p>
+
+<h2>What happens</h2>
+<ol>
+  <li>The install wrapper verifies every file it fetched against <a href="SHA256SUMS">SHA256SUMS</a>, runs <code>install-helios</code>, and seeds the new root with SSH keys and a first-boot service.</li>
+  <li>On first boot, the service brings up DHCP on every NIC, enables sshd and mDNS, prints the address on the console, and disables itself.</li>
+  <li>From a laptop, <code>bin/homicron apply &lt;name&gt;</code> runs the idempotent host steps over SSH: user, swap and dump, packages, Rust, the falcon dataset, and the voxel build.</li>
+</ol>
+
+<p>Source and documentation: <a href="https://github.com/jacobthemyth/homicron">github.com/jacobthemyth/homicron</a>.</p>
+</body>
+</html>
