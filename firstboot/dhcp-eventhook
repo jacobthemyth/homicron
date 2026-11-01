@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# dhcpagent event hook. install/install.sh seeds it to /etc/dhcp/eventhook,
+# and dhcpagent runs it as
+#
+#   /etc/dhcp/eventhook <interface> <event>
+#
+# on every lease event: BOUND, EXTEND, INFORM, EXPIRE, DROP, RELEASE.
+# dhcpagent records the DNS servers from the lease but does not write
+# /etc/resolv.conf (that is nwam's job, and Helios does not run nwam), so on
+# the events that carry a lease this hook writes it. It owns DNS for the
+# life of the machine: a lease that lands after first boot, or a lease that
+# changes the servers, is handled the same way.
+#
+# This hook must always exit 0.
+#
+set -o nounset
+
+# dhcpagent's environment is minimal; dhcpinfo lives in /sbin.
+PATH="$PATH:/sbin:/usr/sbin"
+
+resolv_conf=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
+msglog=${HOMICRON_MSGLOG:-/dev/msglog}
+
+iface=${1:-}
+event=${2:-}
+
+case $event in
+  BOUND|EXTEND|INFORM) ;;
+  *) exit 0 ;;
+esac
+
+servers=$(dhcpinfo -i "$iface" DNSserv 2>/dev/null) || exit 0
+[[ -n $servers ]] || exit 0
+domain=$(dhcpinfo -i "$iface" DNSdmain 2>/dev/null) || domain=
+
+# Write the whole file, then rename, so a reader never sees it half written.
+tmp="$resolv_conf.tmp.$$"
+{
+  [[ -n $domain ]] && printf 'domain %s\n' "$domain"
+  for s in $servers; do
+    printf 'nameserver %s\n' "$s"
+  done
+} > "$tmp"
+mv "$tmp" "$resolv_conf"
+
+svcadm refresh network/dns/client 2>/dev/null || true
+printf 'homicron-dhcp-eventhook: wrote %s from %s\n' "$resolv_conf" "$iface" >> "$msglog" 2>/dev/null
+
+exit 0

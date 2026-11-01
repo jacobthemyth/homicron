@@ -9,6 +9,7 @@ shopt -s nullglob
 files=(
   install/*.sh
   firstboot/homicron-firstboot
+  firstboot/dhcp-eventhook
   host/*.sh
   bin/homicron
   test/*.sh
