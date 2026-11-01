@@ -47,6 +47,23 @@ Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/
    pfexec voxel image create && pfexec voxel image create-frr proto
    ```
 
+## Add a mirror disk later
+
+Start with one disk and convert the root pool to a mirror while the machine
+runs. Rehearsed on the VM on 2026-10-31: `zpool attach` labeled the new disk
+with the same layout as the first, including the EFI system partition, the
+resilver finished, `bootadm` installed the loader on both disks, and the
+machine then booted from the second disk alone.
+
+```
+zpool attach rpool c1t0d0 c2t0d0        # existing disk, then the new one
+zpool status rpool                      # wait until "resilvered ... with 0 errors"
+bootadm install-bootloader -M -P rpool  # loader onto every disk in the pool
+```
+
+Confirm by booting once with the first disk detached. The pool reports
+DEGRADED until the disk is back.
+
 ## What the stages do
 
 | Stage | Where | What |
