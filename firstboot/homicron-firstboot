@@ -9,6 +9,9 @@
 #
 set -o nounset
 
+# The SMF method PATH is /usr/sbin:/usr/bin; dhcpinfo lives in /sbin.
+PATH="$PATH:/sbin"
+
 conf=${HOMICRON_CONF:-/etc/homicron.conf}
 msglog=${HOMICRON_MSGLOG:-/dev/msglog}
 dhcp_wait=${HOMICRON_DHCP_WAIT:-60}
