@@ -124,8 +124,8 @@ column is filled in after the first physical install.
 | the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
 | `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
 | the box answers as `<hostname>.local` through `network/dns/multicast`, so `HOMICRON_ADDR` can stay empty | not testable (qemu user networking carries no multicast) | |
-| `ipadm create-addr -T dhcp -w 0` is accepted and dhcpagent keeps trying in the background | | |
-| dhcpagent runs `/etc/dhcp/eventhook` on BOUND, so `/etc/resolv.conf` is written from the lease | | |
+| `ipadm create-addr -T dhcp -w 0` is accepted and dhcpagent keeps trying in the background | yes: both NICs requested in under a second, the uncabled one shows `?` as its address until a lease | |
+| dhcpagent runs `/etc/dhcp/eventhook` on BOUND, so `/etc/resolv.conf` is written from the lease | yes: the hook logged `wrote /etc/resolv.conf` once from first boot and once from dhcpagent, file mode 0644 | |
 
 Findings from the rehearsal that changed the code:
 
@@ -137,6 +137,21 @@ Findings from the rehearsal that changed the code:
 - `profiles <user>` indents each profile name, so an exact-line match fails.
 - A fresh install's `pkg update` exits 1 with "pkg(7) appears to be out of
   date" until `pkg install pkg:/package/pkg` runs.
+
+Rehearsed again on 2026-11-01 after the review fixes, with a second
+uncabled NIC and the install line pointed at the live site:
+
+- `ipadm show-addr -p -o addr` prints `?` for the uncabled NIC's address
+  object. First boot matches a dotted address, so the `?` is ignored.
+- `pkg update` created a backup boot environment, `helios-backup-1` with no
+  active flags, next to the activated `helios-1`. The reboot check reads the
+  flags, so the backup did not cause a second reboot.
+- dhcpagent ran the hook again after the pkg reboot, and `/etc/resolv.conf`
+  came back with mode 0644.
+- A guest reset during the cargo build made `apply` exit with "cannot reach"
+  20 seconds later.
+- The first `apply`, voxel build included, took about ten minutes on an
+  8-vCPU guest. A second `apply` changed nothing.
 
 ## Development
 
