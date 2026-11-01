@@ -183,7 +183,7 @@ apply() {
 
   printf 'apply complete\n'
   printf 'next, on the box, build the voxel images (30 to 45 minutes):\n'
-  printf '  pfexec voxel image create && pfexec voxel image create-frr proto\n'
+  printf '  pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto\n'
 }
 
 (( $# == 2 )) || usage

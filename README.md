@@ -40,11 +40,12 @@ Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/
    step that updates the operating system asks for a reboot; the runner
    reboots, waits, and continues. Run `apply` again after any failure; steps
    that are already done skip themselves.
-7. Build the voxel images on the machine (30 to 45 minutes):
+7. Build the voxel images on the machine (30 to 45 minutes). The binary is
+   not on the PATH, so the command names its path:
 
    ```
    bin/homicron ssh <hostname>
-   pfexec voxel image create && pfexec voxel image create-frr proto
+   pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto
    ```
 
 ## Add a mirror disk later

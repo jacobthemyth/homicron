@@ -39,6 +39,7 @@ setup() {
   assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 20-b.sh$'
   [[ "$(fake_calls | grep run-step | head -1)" == *10-a.sh ]]
   [[ "${lines[-3]}" == "apply complete" ]]
+  [[ "${lines[-1]}" == '  pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto' ]]
 }
 
 @test "exit 10 reboots, waits, reruns the step, then continues" {
