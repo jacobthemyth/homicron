@@ -117,6 +117,7 @@ column is filled in after the first physical install.
 | `SVCCFG_REPOSITORY=/a/etc/svc/repository.db svccfg import` enables the first-boot service | yes, `general/enabled true` before reboot | |
 | the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
 | `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
+| the box answers as `<hostname>.local` through `network/dns/multicast`, so `HOMICRON_ADDR` can stay empty | not testable (qemu user networking carries no multicast) | |
 
 Findings from the rehearsal that changed the code:
 
