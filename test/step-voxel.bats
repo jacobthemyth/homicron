@@ -10,7 +10,9 @@ setup() {
   make_fake su
   printf 'while [[ $1 != -c ]]; do shift; done; printf "%%s\\n" "$2" >> "$FAKE_LOG.su"; HOME="$HOMICRON_HOME/$HOMICRON_USER" bash -c "$2"\n' > "$FAKE_BIN/su.script"
   make_fake git
-  printf 'case "$1" in rev-parse) echo abc123 ;; clone) mkdir -p "${*: -1}/.git" ;; esac; exit 0\n' > "$FAKE_BIN/git.script"
+  # Like real git, rev-parse without --verify echoes an unresolvable name
+  # to stdout before the result; with --verify -q it prints one line.
+  printf 'case "$1" in rev-parse) if [[ $* == *"^{commit}"* && $* != *--verify* ]]; then echo "origin/${*: -1}"; fi; echo abc123 ;; clone) mkdir -p "${*: -1}/.git" ;; esac; exit 0\n' > "$FAKE_BIN/git.script"
   make_fake cargo
 }
 
@@ -35,9 +37,10 @@ make_checkout() {
   echo 000000 > "$SRC/target/.homicron-built"
   run "$STEP"
   [ "$status" -eq 0 ]
-  grep -q 'git checkout --detach' "$FAKE_LOG.su"
+  grep -q 'git checkout --detach abc123' "$FAKE_LOG.su"
   grep -q 'cargo build --release' "$FAKE_LOG.su"
   [ "$(cat "$SRC/target/.homicron-built")" = abc123 ]
+  [ "$(grep -c 'git fetch' "$FAKE_LOG.su")" -eq 2 ]
 }
 
 @test "a docs-only upstream commit does not wedge the step" {
@@ -57,4 +60,22 @@ make_checkout() {
   [ "$status" -eq 0 ]
   grep -q "git clone https://github.com/oxidecomputer/voxel $SRC" "$FAKE_LOG.su"
   grep -q 'cargo build --release' "$FAKE_LOG.su"
+  [ "$(grep -c 'git fetch' "$FAKE_LOG.su")" -eq 1 ]
+}
+
+@test "a tag ref converges on the first run" {
+  make_checkout
+  echo abc123 > "$SRC/target/.homicron-built"
+  VOXEL_REF=v0.9 run "$STEP"
+  [ "$status" -eq 0 ]
+  ! grep -q 'cargo build' "$FAKE_LOG.su"
+}
+
+@test "a ref that resolves to nothing fails before checkout or build" {
+  make_checkout
+  printf 'case "$1" in rev-parse) [[ $* == *--verify* ]] && exit 1; echo abc123 ;; esac; exit 0\n' > "$FAKE_BIN/git.script"
+  run "$STEP"
+  [ "$status" -ne 0 ]
+  ! grep -q 'git checkout' "$FAKE_LOG.su"
+  ! grep -q 'cargo build' "$FAKE_LOG.su"
 }

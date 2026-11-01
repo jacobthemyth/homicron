@@ -13,6 +13,7 @@ source "$(dirname "$0")/lib.sh"
 
 home_root=${HOMICRON_HOME:-/home}
 src="$home_root/$HOMICRON_USER/src/voxel"
+marker="$src/target/.homicron-built"
 repo=https://github.com/oxidecomputer/voxel
 ref=$VOXEL_REF
 
@@ -28,15 +29,16 @@ head_commit() {
   as_user "cd $src && git rev-parse HEAD"
 }
 
-target_commit() {
-  as_user "cd $src && { git rev-parse 'origin/$ref^{commit}' 2>/dev/null || git rev-parse '$ref^{commit}'; }"
+# The commit $ref names: a branch on origin first, then a tag or commit id.
+# --verify -q prints one line or nothing; without it git echoes the failed
+# name to stdout as well.
+resolve_ref() {
+  as_user "cd $src && { git rev-parse --verify -q 'origin/$ref^{commit}' || git rev-parse --verify -q '$ref^{commit}'; }"
 }
 
 at_ref() {
-  fetch && [[ $(head_commit) == "$(target_commit)" ]]
+  fetch && [[ $(head_commit) == "$(resolve_ref)" ]]
 }
-
-marker="$src/target/.homicron-built"
 
 binary_fresh() {
   [[ -x $src/target/release/voxel && -f $marker ]] && [[ $(cat "$marker") == "$(head_commit)" ]]
@@ -47,13 +49,15 @@ check() {
 }
 
 apply() {
+  local commit
   if ! have_checkout; then
     log "cloning $repo into $src"
     as_user "mkdir -p $(dirname "$src") && git clone $repo $src"
   fi
-  log "checking out $ref"
-  fetch
-  as_user "cd $src && { git checkout --detach 'origin/$ref' 2>/dev/null || git checkout --detach '$ref'; }"
+  # check fetched already, or the clone is fresh; no second fetch.
+  commit=$(resolve_ref)
+  log "checking out $commit ($ref)"
+  as_user "cd $src && git checkout --detach $commit"
   log "cargo build --release (this takes a while)"
   as_user "cd $src && PATH=\$HOME/.cargo/bin:\$PATH cargo build --release"
   as_user "cd $src && git rev-parse HEAD > $marker"
