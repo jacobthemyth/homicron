@@ -60,6 +60,25 @@ remote() {
   ssh -p "$HOMICRON_PORT" "root@$HOMICRON_ADDR" "$@"
 }
 
+# rsync SRC to a path under /opt/homicron on the box. rsync is the first
+# remote contact, so an unreachable box surfaces here.
+sync_to_box() {
+  local src="$1" dest="$2"
+  rsync -az "${@:3}" -e "ssh -p $HOMICRON_PORT" "$src" "root@$HOMICRON_ADDR:$remote_dir/$dest" ||
+    die "cannot reach $HOMICRON_ADDR" 1
+}
+
+# The box gets a fully resolved host.env: file values, environment
+# overrides, and defaults, so steps never see an unset variable.
+write_resolved_env() {
+  local out="$1" var
+  : > "$out"
+  for var in HOMICRON_USER HOMICRON_UID HOMICRON_ADDR HOMICRON_PORT SWAP_SIZE DUMP_SIZE \
+             FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB; do
+    printf '%s=%s\n' "$var" "${!var}" >> "$out"
+  done
+}
+
 wait_for_ssh() {
   local deadline=$(( SECONDS + reboot_timeout ))
   sleep "$(( poll * 4 ))"
@@ -89,14 +108,17 @@ step_failed() {
 }
 
 apply() {
-  local name="$1" file step status
+  local name="$1" step status resolved
   load_host "$name"
-  file="$root/hosts/$name.env"
+  resolved=$(mktemp)
+  # shellcheck disable=SC2064  # expand now: the local is gone when the trap runs
+  trap "rm -f '$resolved'" EXIT
+  write_resolved_env "$resolved"
 
   printf 'syncing host/ to root@%s:%s\n' "$HOMICRON_ADDR" "$remote_dir"
-  rsync -az --delete -e "ssh -p $HOMICRON_PORT" "$root/host/" "root@$HOMICRON_ADDR:$remote_dir/"
-  rsync -az -e "ssh -p $HOMICRON_PORT" "$file" "root@$HOMICRON_ADDR:$remote_dir/host.env"
-  rsync -az -e "ssh -p $HOMICRON_PORT" "$root/keys/authorized_keys" "root@$HOMICRON_ADDR:$remote_dir/authorized_keys"
+  sync_to_box "$root/host/" "" --delete
+  sync_to_box "$resolved" host.env
+  sync_to_box "$root/keys/authorized_keys" authorized_keys
 
   for path in "$root"/host/[0-9][0-9]-*.sh; do
     step=$(basename "$path")

@@ -14,4 +14,5 @@ setup() {
   [ "$status" -eq 10 ]
   [[ "$output" == *"user=jacob swap=4G"* ]]
   grep -q 'user=jacob swap=4G' "$HOMICRON_LOG_DIR/99-x.sh.log"
+  grep -q '^+ echo' "$HOMICRON_LOG_DIR/99-x.sh.log"
 }

@@ -3,7 +3,9 @@
 # Step 60: clone and build voxel as $HOMICRON_USER.
 #
 # End state: ~/src/voxel is checked out at $VOXEL_REF and
-# target/release/voxel is newer than the checkout.
+# target/release/voxel was built from that commit (recorded in
+# target/.homicron-built; mtimes are not used because a docs-only upstream
+# commit moves HEAD without changing the binary).
 #
 set -o errexit -o pipefail -o nounset
 # shellcheck disable=SC1091
@@ -34,8 +36,10 @@ at_ref() {
   fetch && [[ $(head_commit) == "$(target_commit)" ]]
 }
 
+marker="$src/target/.homicron-built"
+
 binary_fresh() {
-  [[ $src/target/release/voxel -nt $src/.git/HEAD ]]
+  [[ -x $src/target/release/voxel && -f $marker ]] && [[ $(cat "$marker") == "$(head_commit)" ]]
 }
 
 check() {
@@ -52,6 +56,7 @@ apply() {
   as_user "cd $src && { git checkout --detach 'origin/$ref' 2>/dev/null || git checkout --detach '$ref'; }"
   log "cargo build --release (this takes a while)"
   as_user "cd $src && PATH=\$HOME/.cargo/bin:\$PATH cargo build --release"
+  as_user "cd $src && git rev-parse HEAD > $marker"
 }
 
 step_main

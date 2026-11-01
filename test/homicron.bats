@@ -76,3 +76,25 @@ EOS
   run "$REPO/bin/homicron" ssh box
   assert_called '^ssh -p 2222 jacob@box.local$'
 }
+
+@test "sends a resolved host.env with defaults and environment overrides" {
+  cat > "$FAKE_BIN/rsync.script" <<'EOS'
+dest="${*: -1}"; src="${*: -2:1}"
+if [[ $dest == *host.env ]]; then cp "$src" "$BATS_TEST_TMPDIR/sent.env"; fi
+exit 0
+EOS
+  VOXEL_REF=v0.9 run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  grep -qx 'SWAP_SIZE=16G' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'VOXEL_REF=v0.9' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'HOMICRON_USER=jacob' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'FALCON_DATASET=' "$BATS_TEST_TMPDIR/sent.env"
+}
+
+@test "rsync failing to connect reports unreachable and never runs a step" {
+  make_fake rsync 255
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot reach box.local"* ]]
+  refute_called '^ssh'
+}

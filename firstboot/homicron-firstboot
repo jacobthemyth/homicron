@@ -36,7 +36,9 @@ for link in $links; do
     say "$link already has a v4 address object"
     continue
   fi
-  if ipadm create-addr -T dhcp "$link/v4"; then
+  # -w 10: do not block two minutes on a port with no cable; dhcpagent keeps
+  # trying in the background and the poll below picks the address up.
+  if ipadm create-addr -T dhcp -w 10 "$link/v4"; then
     say "requested DHCP on $link"
   else
     say "ipadm create-addr failed on $link"

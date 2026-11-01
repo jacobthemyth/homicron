@@ -23,5 +23,5 @@ log="$log_dir/$step.log"
 printf '=== %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$step" >> "$log"
 
 status=0
-bash "$dir/$step" 2>&1 | tee -a "$log" || status=${PIPESTATUS[0]}
+bash -x "$dir/$step" 2>&1 | tee -a "$log" || status=${PIPESTATUS[0]}
 exit "$status"

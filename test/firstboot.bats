@@ -18,14 +18,14 @@ setup() {
   printf '[[ $1 == show-addr ]] && echo "rge0/v4"; exit 0\n' > "$FAKE_BIN/ipadm.script"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  refute_called '^ipadm create-addr -T dhcp rge0/v4$'
-  assert_called '^ipadm create-addr -T dhcp rge1/v4$'
+  refute_called 'create-addr .*rge0/v4$'
+  assert_called '^ipadm create-addr -T dhcp -w 10 rge1/v4$'
 }
 
 @test "a link with only a v6 address object still gets dhcp v4" {
   printf '[[ $1 == show-addr ]] && echo "rge0/v6"; exit 0\n' > "$FAKE_BIN/ipadm.script"
   run "$SCRIPT"
-  assert_called '^ipadm create-addr -T dhcp rge0/v4$'
+  assert_called '^ipadm create-addr -T dhcp -w 10 rge0/v4$'
 }
 
 @test "enables ssh and mdns, then disables itself" {
