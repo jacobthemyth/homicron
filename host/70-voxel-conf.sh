@@ -19,8 +19,9 @@ if [[ -n ${FALCON_DATASET:-} ]]; then
   values+=("$FALCON_DATASET")
 fi
 
+# `config get` prints a string value as a TOML literal, with its quotes.
 current() {
-  as_user "$voxel config get $1" 2>/dev/null || true
+  as_user "$voxel config get $1" 2>/dev/null | sed -e 's/^"//' -e 's/"$//' || true
 }
 
 check() {

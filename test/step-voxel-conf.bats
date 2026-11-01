@@ -16,7 +16,7 @@ setup() {
 #!/bin/bash
 printf '%s\n' "voxel \$*" >> "$FAKE_LOG"
 case "\$1 \$2" in
-  "config get") awk -v k="\$3" '\$1 == k { print \$2 }' "$CONF" ;;
+  "config get") awk -v k="\$3" '\$1 == k { if (\$2 ~ /^[0-9]+\$/) print \$2; else print "\\"" \$2 "\\"" }' "$CONF" ;;
   "config set") printf '%s %s\n' "\$3" "\$4" >> "$CONF" ;;
 esac
 EOS
@@ -44,4 +44,11 @@ EOS
   FALCON_DATASET=fastpool/falcon run "$STEP"
   [ "$status" -eq 0 ]
   assert_called '^voxel config set falcon.dataset fastpool/falcon$'
+}
+
+@test "a string value already set converges although config get quotes it" {
+  printf 'topology.sleds 4\ntopology.sled_memory_gb 8\nfalcon.dataset fastpool/falcon\n' > "$CONF"
+  FALCON_DATASET=fastpool/falcon run "$STEP"
+  [ "$status" -eq 0 ]
+  refute_called '^voxel config set'
 }
