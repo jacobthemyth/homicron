@@ -1,12 +1,15 @@
 #!/bin/bash
 #
-# homicron: laptop-side runner.
+# homicron: workstation-side runner.
 #
 #   bin/homicron apply <name>    rsync host/ to the box and run every step over ssh
 #   bin/homicron ssh <name>      open a shell on the box as $HOMICRON_USER
 #
 # <name> selects hosts/<name>.env. A variable already set in the environment
 # wins over the file, so private addresses never need to be committed.
+#
+# HOMICRON_KEYS names the public keys to install, as a URL or an absolute
+# path. Unset, the runner ships every ~/.ssh/*.pub on this machine.
 #
 set -o errexit -o pipefail -o nounset
 
@@ -28,6 +31,9 @@ reboot_grace=${HOMICRON_REBOOT_GRACE:-60}
 # refuses any other key, so a typo cannot fall back to a default in silence.
 host_vars=(HOMICRON_USER HOMICRON_UID HOMICRON_ADDR HOMICRON_PORT SWAP_SIZE DUMP_SIZE
            FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB)
+# Accepted in the hosts file and the environment like the others, but used
+# by the runner only and never shipped in host.env.
+runner_vars=(HOMICRON_KEYS)
 
 usage() {
   printf 'usage: homicron apply <name> | homicron ssh <name>\n' >&2
@@ -50,10 +56,71 @@ valid_value() {
 
 known_var() {
   local v
-  for v in "${host_vars[@]}"; do
+  for v in "${host_vars[@]}" "${runner_vars[@]}"; do
     [[ $v == "$1" ]] && return 0
   done
   return 1
+}
+
+# A key line has a key type field followed by a base64 field, after any
+# options such as from="...". sshd accepts sk- types and ecdsa- types too.
+type_re='^(sk-)?(ssh|ecdsa)-[A-Za-z0-9.@-]+$'
+blob_re='^[A-Za-z0-9+/=]+$'
+
+is_key_line() {
+  local -a f
+  local i
+  read -r -a f <<< "$1"
+  for (( i = 0; i + 1 < ${#f[@]}; i++ )); do
+    if [[ ${f[i]} =~ $type_re && ${f[i+1]} =~ $blob_re ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Every line must be blank, a comment, or a key, and at least one must be a
+# key. Step 10 overwrites root's authorized_keys with this file, so a wrong
+# URL that returns an HTML page would lock the box: each bad line is named
+# and the file is refused.
+check_keys_file() {
+  local file="$1" line n=0 keys=0 bad=0
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$(( n + 1 ))
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    if is_key_line "$line"; then
+      keys=$(( keys + 1 ))
+    else
+      printf 'homicron: keys: line %d is not a public key\n' "$n" >&2
+      bad=1
+    fi
+  done < "$file"
+  (( bad == 0 && keys > 0 ))
+}
+
+# Write the keys to ship to OUT: HOMICRON_KEYS as a URL or an absolute path,
+# or every ~/.ssh/*.pub on this machine. Certificates (*-cert.pub) are not
+# keys sshd accepts in authorized_keys and are skipped.
+collect_keys() {
+  local out="$1" src=${HOMICRON_KEYS-} f
+  if [[ $src =~ ^https?:// ]]; then
+    curl -fsSL "$src" > "$out" || die "cannot fetch keys from $src" 2
+  elif [[ -n $src ]]; then
+    [[ -f $src && -r $src ]] || die "HOMICRON_KEYS: $src is not a readable file" 2
+    cat "$src" > "$out"
+  else
+    : > "$out"
+    for f in "$HOME"/.ssh/*.pub; do
+      [[ -f $f && $f != *-cert.pub ]] || continue
+      # awk 1 ends every line with a newline, so a file without one cannot
+      # fuse with the next.
+      awk 1 "$f" >> "$out"
+    done
+    if ! grep -Eq '^[[:space:]]*[^#[:space:]]' "$out"; then
+      die 'no public key in ~/.ssh/*.pub; set HOMICRON_KEYS to a URL or an absolute path' 2
+    fi
+  fi
+  check_keys_file "$out" || die "refusing to ship a keys file with a line that is not a key" 2
 }
 
 #
@@ -180,17 +247,18 @@ step_failed() {
 }
 
 apply() {
-  local name="$1" step status resolved
+  local name="$1" step status tmp
   load_host "$name"
-  resolved=$(mktemp)
+  tmp=$(mktemp -d)
   # shellcheck disable=SC2064  # expand now: the local is gone when the trap runs
-  trap "rm -f '$resolved'" EXIT
-  write_resolved_env "$resolved"
+  trap "rm -rf '$tmp'" EXIT
+  write_resolved_env "$tmp/host.env"
+  collect_keys "$tmp/authorized_keys"
 
   printf 'syncing host/ to root@%s:%s\n' "$HOMICRON_ADDR" "$remote_dir"
   sync_to_box "$root/host/" "" --delete
-  sync_to_box "$resolved" host.env
-  sync_to_box "$root/keys/authorized_keys" authorized_keys
+  sync_to_box "$tmp/host.env" host.env
+  sync_to_box "$tmp/authorized_keys" authorized_keys
 
   for path in "$root"/host/[0-9][0-9]-*.sh; do
     step=$(basename "$path")

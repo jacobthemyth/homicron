@@ -5,9 +5,12 @@ BIN="$BATS_TEST_DIRNAME/../bin/homicron"
 setup() {
   fakes_setup
   export REPO="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$REPO/hosts" "$REPO/host" "$REPO/keys" "$REPO/bin"
+  mkdir -p "$REPO/hosts" "$REPO/host" "$REPO/bin"
   if [[ -f $BIN ]]; then cp "$BIN" "$REPO/bin/homicron"; fi
-  : > "$REPO/keys/authorized_keys"
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME/.ssh"
+  printf 'ssh-ed25519 AAAA workstation\n' > "$HOME/.ssh/id_ed25519.pub"
+  unset HOMICRON_KEYS
   printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\nHOMICRON_PORT=2222\n' > "$REPO/hosts/box.env"
   printf '#!/bin/bash\n' > "$REPO/host/10-a.sh"
   printf '#!/bin/bash\n' > "$REPO/host/20-b.sh"
@@ -15,6 +18,15 @@ setup() {
   make_fake ssh
   export HOMICRON_POLL_SECONDS=0 HOMICRON_REBOOT_TIMEOUT=1 HOMICRON_REBOOT_GRACE=0
   unset HOMICRON_ADDR
+}
+
+# A fake rsync that keeps a copy of the shipped host.env and authorized_keys.
+capture_sent() {
+  cat > "$FAKE_BIN/rsync.script" <<'EOS'
+dest="${*: -1}"; src="${*: -2:1}"
+case "$dest" in *host.env) cp "$src" "$BATS_TEST_TMPDIR/sent.env" ;; *authorized_keys) cp "$src" "$BATS_TEST_TMPDIR/sent.keys" ;; esac
+exit 0
+EOS
 }
 
 @test "missing host file or required variable exits 2 before rsync" {
@@ -164,11 +176,7 @@ EOS
 }
 
 @test "sends a resolved host.env with defaults and environment overrides" {
-  cat > "$FAKE_BIN/rsync.script" <<'EOS'
-dest="${*: -1}"; src="${*: -2:1}"
-if [[ $dest == *host.env ]]; then cp "$src" "$BATS_TEST_TMPDIR/sent.env"; fi
-exit 0
-EOS
+  capture_sent
   VOXEL_REF=v0.9 run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
   grep -qx 'SWAP_SIZE=16G' "$BATS_TEST_TMPDIR/sent.env"
@@ -200,4 +208,77 @@ EOS
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot reach box.local"* ]]
   refute_called '^ssh'
+}
+
+@test "by default the shipped keys are every ~/.ssh/*.pub, each ending in a newline, certificates skipped" {
+  printf 'ssh-rsa BBBB second' > "$HOME/.ssh/id_rsa.pub"
+  printf 'ssh-ed25519-cert-v01@openssh.com CCCC cert\n' > "$HOME/.ssh/id_ed25519-cert.pub"
+  capture_sent
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BATS_TEST_TMPDIR/sent.keys" | tr -d ' ')" -eq 2 ]
+  grep -qx 'ssh-ed25519 AAAA workstation' "$BATS_TEST_TMPDIR/sent.keys"
+  grep -qx 'ssh-rsa BBBB second' "$BATS_TEST_TMPDIR/sent.keys"
+  ! grep -q CCCC "$BATS_TEST_TMPDIR/sent.keys"
+}
+
+@test "no ~/.ssh/*.pub and no HOMICRON_KEYS exits 2 before rsync" {
+  rm "$HOME/.ssh/id_ed25519.pub"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'~/.ssh/*.pub'* ]]
+  [[ "$output" == *"HOMICRON_KEYS"* ]]
+  refute_called '^rsync'
+}
+
+@test "HOMICRON_KEYS as a path ships that file" {
+  printf 'ssh-ed25519 DDDD shared\n' > "$BATS_TEST_TMPDIR/shared.keys"
+  printf 'HOMICRON_KEYS=%s\n' "$BATS_TEST_TMPDIR/shared.keys" >> "$REPO/hosts/box.env"
+  capture_sent
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/sent.keys" "$BATS_TEST_TMPDIR/shared.keys"
+  ! grep -q '^HOMICRON_KEYS=' "$BATS_TEST_TMPDIR/sent.env"
+}
+
+@test "HOMICRON_KEYS as a URL is fetched with curl and shipped" {
+  make_fake curl 0 'ssh-ed25519 EEEE fetched'
+  capture_sent
+  HOMICRON_KEYS=https://github.com/user.keys run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called '^curl .*https://github.com/user.keys$'
+  grep -qx 'ssh-ed25519 EEEE fetched' "$BATS_TEST_TMPDIR/sent.keys"
+}
+
+@test "a keys URL that cannot be fetched exits 2 before rsync" {
+  make_fake curl 22
+  HOMICRON_KEYS=https://github.com/user.keys run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"https://github.com/user.keys"* ]]
+  refute_called '^rsync'
+}
+
+@test "HOMICRON_KEYS that is a directory or unreadable exits 2 with the path" {
+  HOMICRON_KEYS="$BATS_TEST_TMPDIR" run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR"* ]]
+  HOMICRON_KEYS="$BATS_TEST_TMPDIR/missing" run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  refute_called '^rsync'
+}
+
+@test "an empty HOMICRON_KEYS in the hosts file means the default" {
+  printf 'HOMICRON_KEYS=\n' >> "$REPO/hosts/box.env"
+  capture_sent
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  grep -qx 'ssh-ed25519 AAAA workstation' "$BATS_TEST_TMPDIR/sent.keys"
+}
+
+@test "a keys source with a line that is not a key exits 2 with the line number" {
+  printf '<html>\n' >> "$HOME/.ssh/id_ed25519.pub"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"line 2 is not a public key"* ]]
+  refute_called '^rsync'
 }
