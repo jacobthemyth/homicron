@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+# homicron first-boot service. Runs once on the first boot after
+# install-helios: brings up DHCP on every physical link, enables sshd and
+# mDNS, reports the addresses on the console, then disables itself.
+#
+# This method must always exit 0. A failing method would put the service in
+# maintenance and hide the console login.
+#
+set -o nounset
+
+conf=${HOMICRON_CONF:-/etc/homicron.conf}
+msglog=${HOMICRON_MSGLOG:-/dev/msglog}
+dhcp_wait=${HOMICRON_DHCP_WAIT:-60}
+
+HOSTNAME=unknown
+if [[ -r $conf ]]; then
+  # shellcheck disable=SC1090
+  source "$conf"
+fi
+
+say() {
+  printf 'homicron-firstboot: %s\n' "$*"
+  printf 'homicron-firstboot: %s\n' "$*" >> "$msglog" 2>/dev/null
+}
+
+say "host $HOSTNAME: configuring network"
+
+links=$(dladm show-phys -p -o link 2>/dev/null)
+for link in $links; do
+  if ipadm show-addr -p -o addrobj 2>/dev/null | grep -qx "$link/v4"; then
+    say "$link already has a v4 address object"
+    continue
+  fi
+  if ipadm create-addr -T dhcp "$link/v4"; then
+    say "requested DHCP on $link"
+  else
+    say "ipadm create-addr failed on $link"
+  fi
+done
+
+svcadm enable network/ssh || say "could not enable network/ssh"
+svcadm enable network/dns/multicast || say "could not enable network/dns/multicast"
+
+addrs=
+for (( i = 0; i < dhcp_wait; i++ )); do
+  addrs=$(ipadm show-addr -p -o addr 2>/dev/null | grep -v '^127\.' | grep -v ':' || true)
+  if [[ -n $addrs ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if [[ -n $addrs ]]; then
+  say "host $HOSTNAME is reachable at:"
+  for a in $addrs; do
+    say "  $a"
+  done
+else
+  say "no DHCP address after ${dhcp_wait}s; sshd is enabled, fix the network from the console"
+fi
+
+svcadm disable site/homicron-firstboot || say "could not disable site/homicron-firstboot"
+
+exit 0

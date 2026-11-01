@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<!--
+    homicron first-boot service. Seeded into the installed root by
+    install/install.sh. Transient: the method runs once per boot and the
+    method disables the instance at the end of its first run.
+-->
+<service_bundle type='manifest' name='homicron-firstboot'>
+<service name='site/homicron-firstboot' type='service' version='1'>
+    <create_default_instance enabled='true' />
+    <single_instance />
+
+    <dependency
+        name='network'
+        grouping='require_all'
+        restart_on='none'
+        type='service'>
+        <service_fmri value='svc:/milestone/network:default' />
+    </dependency>
+
+    <dependency
+        name='filesystem-local'
+        grouping='require_all'
+        restart_on='none'
+        type='service'>
+        <service_fmri value='svc:/system/filesystem/local:default' />
+    </dependency>
+
+    <exec_method
+        type='method'
+        name='start'
+        exec='/usr/lib/homicron-firstboot'
+        timeout_seconds='300' />
+
+    <exec_method
+        type='method'
+        name='stop'
+        exec=':true'
+        timeout_seconds='3' />
+
+    <property_group name='startd' type='framework'>
+        <propval name='duration' type='astring' value='transient' />
+    </property_group>
+
+    <stability value='Unstable' />
+
+    <template>
+        <common_name>
+            <loctext xml:lang='C'>
+                homicron first boot: DHCP, sshd, mDNS
+            </loctext>
+        </common_name>
+    </template>
+</service>
+</service_bundle>
