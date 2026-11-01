@@ -1,10 +1,11 @@
 #!/bin/bash
 #
 # A fake copy of the published site for install.sh tests, plus a fake curl
-# that serves it. Requires fakes_setup to have run (uses $FAKE_BIN).
+# that serves it. The curl also serves the file $FAKE_KEYS for the URL
+# $HOMICRON_KEYS_URL. Requires fakes_setup to have run (uses $FAKE_BIN).
 #
-# fake_site_setup DIR   copy the firstboot files and keys into DIR in site
-#                       layout, write DIR/SHA256SUMS, install the fake curl
+# fake_site_setup DIR   copy the firstboot files into DIR in site layout,
+#                       write DIR/SHA256SUMS, install the fake curl
 # fake_site_resum DIR   regenerate DIR/SHA256SUMS after editing a file
 
 _repo_root() {
@@ -23,16 +24,15 @@ fake_site_resum() {
   local dir="$1"
   (
     cd "$dir" || return 1
-    _sum_tool firstboot/* keys/authorized_keys > SHA256SUMS
+    _sum_tool firstboot/* > SHA256SUMS
   )
 }
 
 fake_site_setup() {
   local dir="$1" root
   root=$(_repo_root)
-  mkdir -p "$dir/firstboot" "$dir/keys"
+  mkdir -p "$dir/firstboot"
   cp "$root"/firstboot/* "$dir/firstboot/"
-  cp "$root/keys/authorized_keys" "$dir/keys/"
   fake_site_resum "$dir"
   export FAKE_SITE="$dir"
 
@@ -47,8 +47,12 @@ while (( $# > 0 )); do
     *) url="$1"; shift ;;
   esac
 done
-rel="${url#"$HOMICRON_BASE_URL"/}"
-src="$FAKE_SITE/$rel"
+if [[ -n ${HOMICRON_KEYS_URL:-} && $url == "$HOMICRON_KEYS_URL" ]]; then
+  src="$FAKE_KEYS"
+else
+  rel="${url#"$HOMICRON_BASE_URL"/}"
+  src="$FAKE_SITE/$rel"
+fi
 if [[ ! -f $src ]]; then
   echo "curl: (22) not found: $url" >&2
   exit 22

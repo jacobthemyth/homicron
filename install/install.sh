@@ -2,17 +2,20 @@
 #
 # homicron stage 1. Runs in the Helios installer ramdisk, as root.
 #
-#   ipadm create-addr -T dhcp rge0/v4 && \
-#     echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && \
-#     curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>...
+#   ipadm create-addr -T dhcp <nic>/v4 && \
+#     echo "nameserver $(dhcpinfo -i <nic> DNSserv)" > /etc/resolv.conf && \
+#     curl -fsSLo /tmp/i https://homicron.smithjs.org/install && \
+#     HOMICRON_KEYS_URL=https://github.com/<user>.keys bash /tmp/i <hostname> <disk>...
 #
-# Runs install-helios, then seeds the new root (still mounted at /a) with the
-# SSH keys, the first-boot service, the dhcpagent DNS hook, the ramdisk's
-# working resolv.conf, and /etc/homicron.conf. Does not reboot.
+# Fetches the public keys from HOMICRON_KEYS_URL, runs install-helios, then
+# seeds the new root (still mounted at /a) with those keys, the first-boot
+# service, the dhcpagent DNS hook, the ramdisk's working resolv.conf, and
+# /etc/homicron.conf. Does not reboot.
 #
 set -o errexit -o pipefail -o nounset
 
 base_url=${HOMICRON_BASE_URL:-https://homicron.smithjs.org}
+keys_url=${HOMICRON_KEYS_URL:-}
 altroot=${HOMICRON_ALTROOT:-/a}
 install_helios=${HOMICRON_INSTALL_HELIOS:-/usr/bin/install-helios}
 ramdisk_resolv=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
@@ -20,6 +23,8 @@ ramdisk_resolv=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
 usage() {
   printf 'usage: install <hostname> <disk> [<disk> [<disk>]]\n' >&2
   printf '  one disk: single; two: mirror; three: raidz1\n' >&2
+  printf '  HOMICRON_KEYS_URL=<url> is required: a URL that serves your public keys, one per line\n' >&2
+  printf '  for example https://github.com/<user>.keys\n' >&2
   exit 2
 }
 
@@ -36,6 +41,41 @@ sum_of() {
   fi
 }
 
+# A key line has a key type field followed by a base64 field, after any
+# options such as from="...". sshd accepts sk- types and ecdsa- types too.
+type_re='^(sk-)?(ssh|ecdsa)-[A-Za-z0-9.@-]+$'
+blob_re='^[A-Za-z0-9+/=]+$'
+
+is_key_line() {
+  local -a f
+  local i
+  read -r -a f <<< "$1"
+  for (( i = 0; i + 1 < ${#f[@]}; i++ )); do
+    if [[ ${f[i]} =~ $type_re && ${f[i+1]} =~ $blob_re ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Every line must be blank, a comment, or a key, and at least one must be a
+# key. A wrong URL can return an HTML page; installed as a key file it would
+# lock the machine, so each bad line is named and the file is refused.
+check_keys_file() {
+  local file="$1" line n=0 keys=0 bad=0
+  while IFS= read -r line || [[ -n $line ]]; do
+    n=$(( n + 1 ))
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    if is_key_line "$line"; then
+      keys=$(( keys + 1 ))
+    else
+      printf 'install: keys: line %d is not a public key\n' "$n" >&2
+      bad=1
+    fi
+  done < "$file"
+  (( bad == 0 && keys > 0 ))
+}
+
 #
 # 1. Are we in the installer?
 #
@@ -47,6 +87,7 @@ fi
 #
 # 2. Arguments.
 #
+[[ -n $keys_url ]] || usage
 if (( $# < 2 || $# > 4 )); then
   usage
 fi
@@ -78,7 +119,6 @@ files=(
   firstboot/homicron-firstboot
   firstboot/homicron-firstboot.xml
   firstboot/dhcp-eventhook
-  keys/authorized_keys
 )
 
 printf 'fetching from %s\n' "$base_url"
@@ -93,11 +133,9 @@ for f in "${files[@]}"; do
   fi
 done
 
-# Any line that is not blank and not a comment is a key: sshd accepts
-# sk- key types, option-prefixed lines, and leading whitespace.
-if ! grep -Eq '^[[:space:]]*[^#[:space:]]' "$tmp/keys/authorized_keys"; then
-  fail "authorized_keys contains no key; refusing to install a machine nobody can log in to"
-fi
+printf 'fetching keys from %s\n' "$keys_url"
+curl -fsSL -o "$tmp/authorized_keys" "$keys_url" || fail "could not fetch keys from $keys_url"
+check_keys_file "$tmp/authorized_keys" || fail "$keys_url is not a usable authorized_keys file; refusing to install a machine nobody can log in to"
 
 #
 # 4. Install.
@@ -113,7 +151,7 @@ printf 'seeding %s\n' "$altroot"
 # GNU install, and the ramdisk PATH finds the illumos one first.
 mkdir -p "$altroot/root/.ssh" "$altroot/lib/svc/manifest/site" "$altroot/usr/lib" "$altroot/etc"
 chmod 0700 "$altroot/root/.ssh"
-cp "$tmp/keys/authorized_keys" "$altroot/root/.ssh/authorized_keys"
+cp "$tmp/authorized_keys" "$altroot/root/.ssh/authorized_keys"
 chmod 0600 "$altroot/root/.ssh/authorized_keys"
 
 manifest="$altroot/lib/svc/manifest/site/homicron-firstboot.xml"
@@ -136,7 +174,7 @@ if grep -q '^nameserver' "$ramdisk_resolv" 2>/dev/null; then
   chmod 0644 "$altroot/etc/resolv.conf"
 fi
 
-printf 'HOSTNAME=%s\nBASE_URL=%s\n' "$hostname" "$base_url" > "$altroot/etc/homicron.conf"
+printf 'HOSTNAME=%s\nKEYS_URL=%s\n' "$hostname" "$keys_url" > "$altroot/etc/homicron.conf"
 chmod 0644 "$altroot/etc/homicron.conf"
 
 #

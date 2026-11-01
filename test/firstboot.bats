@@ -5,7 +5,7 @@ SCRIPT="$BATS_TEST_DIRNAME/../firstboot/homicron-firstboot"
 setup() {
   fakes_setup
   export HOMICRON_CONF="$BATS_TEST_TMPDIR/homicron.conf" HOMICRON_MSGLOG="$BATS_TEST_TMPDIR/msglog" HOMICRON_DHCP_WAIT=1
-  printf 'HOSTNAME=host01\nBASE_URL=https://homicron.smithjs.org\n' > "$HOMICRON_CONF"
+  printf 'HOSTNAME=host01\nKEYS_URL=https://github.com/user.keys\n' > "$HOMICRON_CONF"
   make_fake dladm 0 $'rge0\nrge1'
   make_fake svcadm
   make_fake ipadm
