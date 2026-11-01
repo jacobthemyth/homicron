@@ -31,6 +31,11 @@ jobs:
   deploy:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # One deploy at a time: the Pages API rejects a second deployment while
+    # one is in progress, and a push shortly after another would fail.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       pages: write
