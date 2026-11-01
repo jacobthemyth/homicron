@@ -167,6 +167,12 @@ load_host() {
   ssh_opts=(-p "$HOMICRON_PORT" -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
 }
 
+# ssh exits 255 for every transport failure: a box that is down, and also a
+# host key that no longer matches known_hosts, which a reinstall causes.
+unreachable() {
+  die "cannot reach $HOMICRON_ADDR: ssh exited 255 (the box is down, or its host key changed after a reinstall; try ssh root@$HOMICRON_ADDR by hand)" 1
+}
+
 remote() {
   # shellcheck disable=SC2029  # callers pass a command string meant to expand on the box
   ssh "${ssh_opts[@]}" "root@$HOMICRON_ADDR" "$@"
@@ -178,7 +184,7 @@ sync_to_box() {
   local src="$1" dest="$2" status=0
   rsync -az "${@:3}" -e "ssh ${ssh_opts[*]}" "$src" "root@$HOMICRON_ADDR:$remote_dir/$dest" || status=$?
   (( status == 0 )) && return 0
-  (( status == 255 )) && die "cannot reach $HOMICRON_ADDR" 1
+  (( status == 255 )) && unreachable
   die "rsync failed with status $status" 1
 }
 
@@ -245,7 +251,7 @@ run_step() {
 step_failed() {
   local step="$1" status="$2"
   if (( status == 255 )); then
-    die "cannot reach $HOMICRON_ADDR" 1
+    unreachable
   fi
   printf -- '--- %s/%s.log ---\n' "$remote_log_dir" "$step"
   remote "cat $remote_log_dir/$step.log" || true

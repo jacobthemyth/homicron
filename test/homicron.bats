@@ -157,6 +157,8 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot reach box.local"* ]]
+  [[ "$output" == *"host key"* ]]
+  [[ "$output" == *"ssh root@box.local"* ]]
 }
 
 @test "other failures stop, print the log, and pass the status through" {
@@ -222,6 +224,8 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot reach box.local"* ]]
+  [[ "$output" == *"host key"* ]]
+  [[ "$output" == *"ssh root@box.local"* ]]
   refute_called '^ssh'
 }
 
