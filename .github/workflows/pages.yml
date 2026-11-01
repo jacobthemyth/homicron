@@ -17,19 +17,8 @@ jobs:
       - run: test/lint.sh
       - run: test/run-tests.sh
 
-  build:
-    needs: lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: pages/build-site.sh _site
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
   deploy:
-    needs: build
+    needs: lint
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # One deploy at a time: the Pages API rejects a second deployment while
     # one is in progress, and a push shortly after another would fail.
@@ -38,11 +27,24 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+      # configure-pages reports the address the site is served at, custom
+      # domain or <owner>.github.io/<repo>, so a fork builds for its own.
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: pages/build-site.sh _site
+        env:
+          HOMICRON_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          HOMICRON_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
