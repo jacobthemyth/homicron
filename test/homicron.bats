@@ -29,11 +29,26 @@ exit 0
 EOS
 }
 
-@test "missing host file or required variable exits 2 before rsync" {
+@test "missing host file exits 2 before rsync" {
   run "$REPO/bin/homicron" apply nope
   [ "$status" -eq 2 ]
-  printf 'HOMICRON_USER=vmuser\n' > "$REPO/hosts/bad.env"
-  run "$REPO/bin/homicron" apply bad
+  refute_called '^rsync'
+}
+
+@test "login and uid default to the workstation's" {
+  printf 'HOMICRON_PORT=2222\n' > "$REPO/hosts/plain.env"
+  capture_sent
+  run "$REPO/bin/homicron" apply plain
+  [ "$status" -eq 0 ]
+  grep -qx "HOMICRON_USER=$(id -un)" "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx "HOMICRON_UID=$(id -u)" "$BATS_TEST_TMPDIR/sent.env"
+}
+
+@test "a root login or uid 0 exits 2 before rsync" {
+  HOMICRON_USER=root run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"root"* ]]
+  HOMICRON_UID=0 run "$REPO/bin/homicron" apply box
   [ "$status" -eq 2 ]
   refute_called '^rsync'
 }

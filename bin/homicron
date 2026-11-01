@@ -146,8 +146,14 @@ load_host() {
     fi
   done < "$file"
 
-  [[ -n ${HOMICRON_USER:-} ]] || die "HOMICRON_USER is required (hosts/$name.env)" 2
-  [[ -n ${HOMICRON_UID:-} ]] || die "HOMICRON_UID is required (hosts/$name.env)" 2
+  # The login and uid default to this workstation's, so files that move
+  # between the two machines keep a readable owner. Root is never a valid
+  # answer: the runner logs in as root and step 10 would run useradd -u 0.
+  export HOMICRON_USER=${HOMICRON_USER:-$(id -un)}
+  export HOMICRON_UID=${HOMICRON_UID:-$(id -u)}
+  if [[ $HOMICRON_USER == root || $HOMICRON_UID == 0 ]]; then
+    die "HOMICRON_USER=$HOMICRON_USER uid $HOMICRON_UID: the runner logs in as root and will not create root; set HOMICRON_USER and HOMICRON_UID" 2
+  fi
 
   export HOMICRON_ADDR=${HOMICRON_ADDR:-$name.local}
   export HOMICRON_PORT=${HOMICRON_PORT:-22}
