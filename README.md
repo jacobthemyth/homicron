@@ -71,6 +71,8 @@ ipadm create-addr -T dhcp vioif0/v4 && echo "nameserver $(dhcpinfo -i vioif0 DNS
 
 The VM reaches GitHub through qemu's user-mode network, so the keys URL works unchanged.
 
+For a clean reinstall, delete `test/vm/disk.qcow2` and `test/vm/vars.fd` together. The firmware keeps its boot order in `vars.fd`, and a stale copy tries four network boot entries, about three minutes, before it reaches the disk or the ISO. A reinstall also changes the VM's ssh host key, so remove the old one with `ssh-keygen -R '[<host-ip>]:2222'` before the first `apply`.
+
 Then `reboot`, quit qemu with `Ctrl-a x` when the loader appears, and boot the installed disk with `test/qemu.sh boot`. ssh is forwarded to port 2222 on the Linux host, so if the Linux host is remote, run apply with the following:
 
 ```
