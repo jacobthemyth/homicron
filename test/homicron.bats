@@ -53,6 +53,15 @@ EOS
   refute_called '^rsync'
 }
 
+@test "a uid that is not a positive integer exits 2 before rsync" {
+  for bad in 00 000 5a -1; do
+    HOMICRON_UID=$bad run "$REPO/bin/homicron" apply box
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"HOMICRON_UID=$bad"* ]]
+  done
+  refute_called '^rsync'
+}
+
 @test "environment wins over the host file" {
   HOMICRON_ADDR=10.9.9.9 run "$REPO/bin/homicron" apply box
   assert_called 'root@10.9.9.9'
@@ -299,5 +308,19 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 2 ]
   [[ "$output" == *"line 2 is not a public key"* ]]
+  refute_called '^rsync'
+}
+
+@test "a keys source with no key line says so instead of naming a bad line" {
+  make_fake curl 0 ''
+  HOMICRON_KEYS=https://github.com/nokeys.keys run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no key line"* ]]
+  [[ "$output" != *"is not a public key"* ]]
+  [[ "$output" != *"line that is not a key"* ]]
+  printf '# only a comment\n' > "$BATS_TEST_TMPDIR/empty.keys"
+  HOMICRON_KEYS="$BATS_TEST_TMPDIR/empty.keys" run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no key line"* ]]
   refute_called '^rsync'
 }

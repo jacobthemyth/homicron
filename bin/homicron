@@ -95,6 +95,9 @@ check_keys_file() {
       bad=1
     fi
   done < "$file"
+  if (( bad == 0 && keys == 0 )); then
+    printf '%s: keys: no key line (every line is blank or a comment)\n' "homicron" >&2
+  fi
   (( bad == 0 && keys > 0 ))
 }
 
@@ -120,7 +123,7 @@ collect_keys() {
       die 'no public key in ~/.ssh/*.pub; set HOMICRON_KEYS to a URL or an absolute path' 2
     fi
   fi
-  check_keys_file "$out" || die "refusing to ship a keys file with a line that is not a key" 2
+  check_keys_file "$out" || die "refusing to ship a keys file that is not a usable authorized_keys file" 2
 }
 
 #
@@ -151,8 +154,13 @@ load_host() {
   # answer: the runner logs in as root and step 10 would run useradd -u 0.
   export HOMICRON_USER=${HOMICRON_USER:-$(id -un)}
   export HOMICRON_UID=${HOMICRON_UID:-$(id -u)}
-  if [[ $HOMICRON_USER == root || $HOMICRON_UID == 0 ]]; then
-    die "HOMICRON_USER=$HOMICRON_USER uid $HOMICRON_UID: the runner logs in as root and will not create root; set HOMICRON_USER and HOMICRON_UID" 2
+  if [[ $HOMICRON_USER == root ]]; then
+    die "HOMICRON_USER=root: the runner logs in as root and will not create root; set HOMICRON_USER and HOMICRON_UID" 2
+  fi
+  # A positive integer with no leading zero: 0, 00, and 000 all mean root to
+  # useradd, and a non-number would fail on the box instead of here.
+  if ! [[ $HOMICRON_UID =~ ^[1-9][0-9]*$ ]]; then
+    die "HOMICRON_UID=$HOMICRON_UID: must be a positive integer, and 0 is root, which the runner will not create" 2
   fi
 
   export HOMICRON_ADDR=${HOMICRON_ADDR:-$name.local}

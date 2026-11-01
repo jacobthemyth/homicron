@@ -73,6 +73,9 @@ check_keys_file() {
       bad=1
     fi
   done < "$file"
+  if (( bad == 0 && keys == 0 )); then
+    printf '%s: keys: no key line (every line is blank or a comment)\n' "install" >&2
+  fi
   (( bad == 0 && keys > 0 ))
 }
 

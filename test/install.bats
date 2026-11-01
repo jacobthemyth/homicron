@@ -92,6 +92,8 @@ file_mode() {
   : > "$FAKE_KEYS"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 1 ]
+  [[ "$output" == *"no key line"* ]]
+  [[ "$output" != *"is not a public key"* ]]
   refute_called '^install-helios'
 }
 
