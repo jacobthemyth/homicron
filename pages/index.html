@@ -17,7 +17,8 @@
 
 <h2>Install</h2>
 <p>Boot the stock Helios installer ISO. At its root prompt, find the NIC with <code>dladm show-phys</code> and the disk with <code>diskinfo</code>, then type:</p>
-<pre><code>ipadm create-addr -T dhcp rge0/v4 &amp;&amp; echo "nameserver $(dhcpinfo -i rge0 DNSserv)" &gt; /etc/resolv.conf &amp;&amp; curl -fsSLo /tmp/i https://homicron.smithjs.org/install &amp;&amp; bash /tmp/i &lt;hostname&gt; &lt;disk&gt;</code></pre>
+<pre><code>ipadm create-addr -T dhcp &lt;nic&gt;/v4 &amp;&amp; echo "nameserver $(dhcpinfo -i &lt;nic&gt; DNSserv)" &gt; /etc/resolv.conf &amp;&amp; curl -fsSLo /tmp/i {{BASE_URL}}/install &amp;&amp; HOMICRON_KEYS_URL=https://github.com/&lt;user&gt;.keys bash /tmp/i &lt;hostname&gt; &lt;disk&gt;</code></pre>
+<p><code>HOMICRON_KEYS_URL</code> names the public keys root will accept. GitHub serves yours at that address.</p>
 <p>The second command is needed because the installer ramdisk ships an empty <code>/etc/resolv.conf</code> and DHCP does not fill it, so the name would not resolve.</p>
 <p>When it prints <code>install complete</code>, remove the media and run <code>reboot</code>.</p>
 
@@ -25,9 +26,9 @@
 <ol>
   <li>The install wrapper verifies every file it fetched against <a href="SHA256SUMS">SHA256SUMS</a>, runs <code>install-helios</code>, and seeds the new root with SSH keys and a first-boot service.</li>
   <li>On first boot, the service brings up DHCP on every NIC, enables sshd and mDNS, prints the address on the console, and disables itself.</li>
-  <li>From a laptop, <code>bin/homicron apply &lt;name&gt;</code> runs the idempotent host steps over SSH: user, swap and dump, packages, Rust, the falcon dataset, and the voxel build.</li>
+  <li>From your workstation, <code>bin/homicron apply &lt;name&gt;</code> runs the idempotent host steps over SSH: user, swap and dump, packages, Rust, the falcon dataset, and the voxel build.</li>
 </ol>
 
-<p>Source and documentation: <a href="https://github.com/jacobthemyth/homicron">github.com/jacobthemyth/homicron</a>.</p>
+<p>Source and documentation: <a href="{{REPO_URL}}">{{REPO_URL}}</a>.</p>
 </body>
 </html>
