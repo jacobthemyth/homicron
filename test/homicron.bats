@@ -35,8 +35,8 @@ setup() {
 @test "runs steps in order over ssh with the port" {
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
-  assert_called '^ssh -p 2222 root@box.local /opt/homicron/run-step.sh 10-a.sh$'
-  assert_called '^ssh -p 2222 root@box.local /opt/homicron/run-step.sh 20-b.sh$'
+  assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 10-a.sh$'
+  assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 20-b.sh$'
   [[ "$(fake_calls | grep run-step | head -1)" == *10-a.sh ]]
   [[ "${lines[-3]}" == "apply complete" ]]
 }
@@ -74,7 +74,23 @@ EOS
 
 @test "ssh subcommand uses the user and port" {
   run "$REPO/bin/homicron" ssh box
-  assert_called '^ssh -p 2222 jacob@box.local$'
+  assert_called '^ssh -p 2222 .*jacob@box.local$'
+}
+
+@test "every ssh and the rsync transport carry keepalives" {
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called '^ssh -p 2222 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@box.local /opt/homicron/run-step.sh 10-a.sh$'
+  assert_called '^rsync .* -e ssh -p 2222 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 .*host.env$'
+}
+
+@test "an rsync failure that is not 255 is reported as rsync, not as unreachable" {
+  make_fake rsync 127
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rsync failed with status 127"* ]]
+  [[ "$output" != *"cannot reach"* ]]
+  refute_called '^ssh'
 }
 
 @test "sends a resolved host.env with defaults and environment overrides" {

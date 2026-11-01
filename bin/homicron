@@ -13,6 +13,10 @@ set -o errexit -o pipefail -o nounset
 root=$(cd "$(dirname "$0")/.." && pwd)
 remote_dir=/opt/homicron
 remote_log_dir=/var/log/homicron
+# Every ssh and the rsync transport use these. Keepalives: a NAT or port
+# forward (qemu user networking, some firewalls) never closes the connection
+# when the box goes down, and a plain ssh would hang forever.
+ssh_opts=()
 
 poll=${HOMICRON_POLL_SECONDS:-5}
 reboot_timeout=${HOMICRON_REBOOT_TIMEOUT:-600}
@@ -54,18 +58,23 @@ load_host() {
   export VOXEL_REF=${VOXEL_REF:-main}
   export VOXEL_SLEDS=${VOXEL_SLEDS:-4}
   export VOXEL_SLED_MEMORY_GB=${VOXEL_SLED_MEMORY_GB:-8}
+
+  ssh_opts=(-p "$HOMICRON_PORT" -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
 }
 
 remote() {
-  ssh -p "$HOMICRON_PORT" "root@$HOMICRON_ADDR" "$@"
+  # shellcheck disable=SC2029  # callers pass a command string meant to expand on the box
+  ssh "${ssh_opts[@]}" "root@$HOMICRON_ADDR" "$@"
 }
 
 # rsync SRC to a path under /opt/homicron on the box. rsync is the first
-# remote contact, so an unreachable box surfaces here.
+# remote contact, so an unreachable box surfaces here as 255.
 sync_to_box() {
-  local src="$1" dest="$2"
-  rsync -az "${@:3}" -e "ssh -p $HOMICRON_PORT" "$src" "root@$HOMICRON_ADDR:$remote_dir/$dest" ||
-    die "cannot reach $HOMICRON_ADDR" 1
+  local src="$1" dest="$2" status=0
+  rsync -az "${@:3}" -e "ssh ${ssh_opts[*]}" "$src" "root@$HOMICRON_ADDR:$remote_dir/$dest" || status=$?
+  (( status == 0 )) && return 0
+  (( status == 255 )) && die "cannot reach $HOMICRON_ADDR" 1
+  die "rsync failed with status $status" 1
 }
 
 # The box gets a fully resolved host.env: file values, environment
@@ -82,7 +91,7 @@ write_resolved_env() {
 wait_for_ssh() {
   local deadline=$(( SECONDS + reboot_timeout ))
   sleep "$(( poll * 4 ))"
-  until ssh -p "$HOMICRON_PORT" -o ConnectTimeout=5 "root@$HOMICRON_ADDR" true >/dev/null 2>&1; do
+  until ssh "${ssh_opts[@]}" -o ConnectTimeout=5 "root@$HOMICRON_ADDR" true >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
       die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
     fi
@@ -126,10 +135,7 @@ apply() {
     run_step "$step" || status=$?
     if (( status == 10 )); then
       printf '%s requested a reboot\n' "$step"
-      # Keepalives: a NAT or port forward (qemu user networking, some
-      # firewalls) never closes the connection when the box goes down, and a
-      # plain ssh would hang here forever.
-      ssh -p "$HOMICRON_PORT" -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "root@$HOMICRON_ADDR" reboot || true
+      remote reboot || true
       wait_for_ssh
       status=0
       run_step "$step" || status=$?
@@ -151,7 +157,7 @@ case "$1" in
     ;;
   ssh)
     load_host "$2"
-    exec ssh -p "$HOMICRON_PORT" "$HOMICRON_USER@$HOMICRON_ADDR"
+    exec ssh "${ssh_opts[@]}" "$HOMICRON_USER@$HOMICRON_ADDR"
     ;;
   *)
     usage
