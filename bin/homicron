@@ -23,7 +23,7 @@ usage() {
 }
 
 die() {
-  printf 'homicron: %s\n' "$*" >&2
+  printf 'homicron: %s\n' "$1" >&2
   exit "${2:-1}"
 }
 

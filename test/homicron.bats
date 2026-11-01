@@ -67,6 +67,7 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 3 ]
   [[ "$output" == *LOGLINE* ]]
+  [[ "$output" == *"step 10-a.sh failed with status 3" ]]
   refute_called '20-b.sh$'
 }
 

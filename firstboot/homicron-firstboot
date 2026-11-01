@@ -12,6 +12,7 @@ set -o nounset
 conf=${HOMICRON_CONF:-/etc/homicron.conf}
 msglog=${HOMICRON_MSGLOG:-/dev/msglog}
 dhcp_wait=${HOMICRON_DHCP_WAIT:-60}
+resolv_conf=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
 
 HOSTNAME=unknown
 if [[ -r $conf ]]; then
@@ -51,7 +52,37 @@ for (( i = 0; i < dhcp_wait; i++ )); do
   sleep 1
 done
 
+#
+# dhcpagent records the DNS servers from the lease but does not write
+# /etc/resolv.conf (that is nwam's job, and Helios does not run nwam).
+#
+write_resolv_conf() {
+  local link servers domain found=no
+  for link in $links; do
+    servers=$(dhcpinfo -i "$link" DNSserv 2>/dev/null || true)
+    [[ -n $servers ]] || continue
+    if [[ $found == no ]]; then
+      : > "$resolv_conf"
+      found=yes
+      domain=$(dhcpinfo -i "$link" DNSdmain 2>/dev/null || true)
+      [[ -n $domain ]] && printf 'domain %s\n' "$domain" >> "$resolv_conf"
+    fi
+    for s in $servers; do
+      printf 'nameserver %s\n' "$s" >> "$resolv_conf"
+    done
+  done
+  if [[ $found == yes ]]; then
+    say "wrote $resolv_conf from the DHCP lease"
+    svcadm refresh network/dns/client || say "could not refresh network/dns/client"
+  else
+    say "no DNS servers in the DHCP lease; $resolv_conf not written"
+  fi
+}
+
 if [[ -n $addrs ]]; then
+  if [[ ! -s $resolv_conf ]]; then
+    write_resolv_conf
+  fi
   say "host $HOSTNAME is reachable at:"
   for a in $addrs; do
     say "  $a"

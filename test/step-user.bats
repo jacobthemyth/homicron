@@ -14,7 +14,7 @@ setup() {
 
 @test "does nothing when the end state already holds" {
   printf 'echo "jacob:x:501:10::/home/jacob:/bin/bash"\n' > "$FAKE_BIN/getent.script"
-  printf 'echo "Primary Administrator"\n' > "$FAKE_BIN/profiles.script"
+  printf 'printf "jacob:\\n          Primary Administrator\\n          Basic Solaris User\\n"\n' > "$FAKE_BIN/profiles.script"
   printf 'echo "basic,net_icmpaccess"\n' > "$FAKE_BIN/userattr.script"
   mkdir -p "$HOMICRON_HOME/jacob/.ssh"
   cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/jacob/.ssh/"
@@ -43,7 +43,7 @@ setup() {
 
 @test "adds only what is missing when the user exists" {
   printf 'echo "jacob:x:501:10::/home/jacob:/bin/bash"\n' > "$FAKE_BIN/getent.script"
-  printf 'echo "Primary Administrator"\n' > "$FAKE_BIN/profiles.script"
+  printf 'printf "jacob:\\n          Primary Administrator\\n"\n' > "$FAKE_BIN/profiles.script"
   printf 'echo "basic"\n' > "$FAKE_BIN/userattr.script"
   run "$STEP"
   refute_called '^useradd'

@@ -32,7 +32,8 @@ dataset_exists() {
 }
 
 has_profile() {
-  profiles "$user" 2>/dev/null | grep -qx 'Primary Administrator'
+  # profiles(1) prints a "user:" header and indents each profile name.
+  profiles "$user" 2>/dev/null | sed 's/^[[:space:]]*//' | grep -qx 'Primary Administrator'
 }
 
 has_icmp_priv() {

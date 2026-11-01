@@ -9,6 +9,9 @@ setup() {
   make_fake dladm 0 $'rge0\nrge1'
   make_fake svcadm
   make_fake ipadm
+  make_fake dhcpinfo
+  printf '[[ $* == *DNSserv* ]] && echo 10.0.2.3; exit 0\n' > "$FAKE_BIN/dhcpinfo.script"
+  export HOMICRON_RESOLV_CONF="$BATS_TEST_TMPDIR/resolv.conf"
 }
 
 @test "creates a dhcp v4 address on every physical link without one" {
@@ -44,6 +47,21 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q 'no DHCP address after 1s' "$HOMICRON_MSGLOG"
   assert_called '^svcadm disable site/homicron-firstboot$'
+}
+
+@test "writes resolv.conf from the dhcp lease when it is absent" {
+  printf '[[ $1 == show-addr ]] && [[ $* == *-o\\ addr* ]] && echo "10.0.2.15/24"; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx 'nameserver 10.0.2.3' "$HOMICRON_RESOLV_CONF"
+  assert_called '^svcadm refresh network/dns/client$'
+}
+
+@test "leaves an existing resolv.conf alone" {
+  printf 'nameserver 9.9.9.9\n' > "$HOMICRON_RESOLV_CONF"
+  run "$SCRIPT"
+  [ "$(cat "$HOMICRON_RESOLV_CONF")" = "nameserver 9.9.9.9" ]
+  refute_called '^svcadm refresh network/dns/client$'
 }
 
 @test "manifest is well-formed xml" {
