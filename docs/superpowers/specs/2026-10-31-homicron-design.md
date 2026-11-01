@@ -215,7 +215,7 @@ DUMP_SIZE=16G                rpool/dump zvol
 FALCON_DATASET=              zfs dataset for voxel images and disks; empty = rpool default
 VOXEL_REF=main               git ref of oxidecomputer/voxel to build
 VOXEL_SLEDS=4
-VOXEL_SLED_MEMORY_GB=11
+VOXEL_SLED_MEMORY_GB=8
 ```
 
 ### Runner
@@ -265,7 +265,7 @@ state again and exits 1 if the state is still wrong.
 | 40-rust.sh | `~$USER/.cargo/bin/cargo` runs | as `$USER`: rustup install with `bash` in place of `sh` |
 | 50-falcon.sh | `$FALCON_DATASET` exists, or the variable is empty | `zfs create -p` |
 | 60-voxel.sh | `~$USER/src/voxel` is at `$VOXEL_REF` and `target/release/voxel` is newer than the checkout | as `$USER`: `git clone` or `git fetch` and `git checkout`, `cargo build --release` |
-| 70-voxel-conf.sh | `voxel config get` returns the configured values for `topology.sleds`, `topology.sled_memory_gb`, and `falcon.dataset` when set | as `$USER`: `voxel config set` for each |
+| 70-voxel-conf.sh | `voxel config get <key>` returns the configured values for `topology.sleds`, `topology.sled_memory_gb`, and `falcon.dataset` when set | as `$USER`: `voxel config set` for each |
 
 The second run of `apply` on a finished box runs every step and changes
 nothing. That is the test of idempotence.
