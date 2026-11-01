@@ -1,0 +1,134 @@
+#!/bin/bash
+#
+# homicron: laptop-side runner.
+#
+#   bin/homicron apply <name>    rsync host/ to the box and run every step over ssh
+#   bin/homicron ssh <name>      open a shell on the box as $HOMICRON_USER
+#
+# <name> selects hosts/<name>.env. A variable already set in the environment
+# wins over the file, so private addresses never need to be committed.
+#
+set -o errexit -o pipefail -o nounset
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+remote_dir=/opt/homicron
+remote_log_dir=/var/log/homicron
+
+poll=${HOMICRON_POLL_SECONDS:-5}
+reboot_timeout=${HOMICRON_REBOOT_TIMEOUT:-600}
+
+usage() {
+  printf 'usage: homicron apply <name> | homicron ssh <name>\n' >&2
+  exit 2
+}
+
+die() {
+  printf 'homicron: %s\n' "$*" >&2
+  exit "${2:-1}"
+}
+
+#
+# Load hosts/<name>.env. Environment values take precedence over the file.
+#
+load_host() {
+  local name="$1" file key value
+  file="$root/hosts/$name.env"
+  [[ -f $file ]] || die "no host file $file" 2
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    key=${line%%=*}
+    value=${line#*=}
+    if [[ -z ${!key+set} ]]; then
+      export "$key=$value"
+    fi
+  done < "$file"
+
+  [[ -n ${HOMICRON_USER:-} ]] || die "HOMICRON_USER is required (hosts/$name.env)" 2
+  [[ -n ${HOMICRON_UID:-} ]] || die "HOMICRON_UID is required (hosts/$name.env)" 2
+
+  export HOMICRON_ADDR=${HOMICRON_ADDR:-$name.local}
+  export HOMICRON_PORT=${HOMICRON_PORT:-22}
+  export SWAP_SIZE=${SWAP_SIZE:-16G}
+  export DUMP_SIZE=${DUMP_SIZE:-16G}
+  export FALCON_DATASET=${FALCON_DATASET-}
+  export VOXEL_REF=${VOXEL_REF:-main}
+  export VOXEL_SLEDS=${VOXEL_SLEDS:-4}
+  export VOXEL_SLED_MEMORY_GB=${VOXEL_SLED_MEMORY_GB:-8}
+}
+
+remote() {
+  ssh -p "$HOMICRON_PORT" "root@$HOMICRON_ADDR" "$@"
+}
+
+wait_for_ssh() {
+  local deadline=$(( SECONDS + reboot_timeout ))
+  sleep "$(( poll * 4 ))"
+  until ssh -p "$HOMICRON_PORT" -o ConnectTimeout=5 "root@$HOMICRON_ADDR" true >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
+    fi
+    sleep "$poll"
+  done
+}
+
+run_step() {
+  local step="$1" status=0
+  printf '==> %s\n' "$step"
+  remote "$remote_dir/run-step.sh $step" || status=$?
+  return $status
+}
+
+step_failed() {
+  local step="$1" status="$2"
+  if (( status == 255 )); then
+    die "cannot reach $HOMICRON_ADDR" 1
+  fi
+  printf -- '--- %s/%s.log ---\n' "$remote_log_dir" "$step"
+  remote "cat $remote_log_dir/$step.log" || true
+  die "step $step failed with status $status" "$status"
+}
+
+apply() {
+  local name="$1" file step status
+  load_host "$name"
+  file="$root/hosts/$name.env"
+
+  printf 'syncing host/ to root@%s:%s\n' "$HOMICRON_ADDR" "$remote_dir"
+  rsync -az --delete -e "ssh -p $HOMICRON_PORT" "$root/host/" "root@$HOMICRON_ADDR:$remote_dir/"
+  rsync -az -e "ssh -p $HOMICRON_PORT" "$file" "root@$HOMICRON_ADDR:$remote_dir/host.env"
+  rsync -az -e "ssh -p $HOMICRON_PORT" "$root/keys/authorized_keys" "root@$HOMICRON_ADDR:$remote_dir/authorized_keys"
+
+  for path in "$root"/host/[0-9][0-9]-*.sh; do
+    step=$(basename "$path")
+    status=0
+    run_step "$step" || status=$?
+    if (( status == 10 )); then
+      printf '%s requested a reboot\n' "$step"
+      remote reboot || true
+      wait_for_ssh
+      status=0
+      run_step "$step" || status=$?
+    fi
+    if (( status != 0 )); then
+      step_failed "$step" "$status"
+    fi
+  done
+
+  printf 'apply complete\n'
+  printf 'next, on the box, build the voxel images (30 to 45 minutes):\n'
+  printf '  pfexec voxel image create && pfexec voxel image create-frr proto\n'
+}
+
+(( $# == 2 )) || usage
+case "$1" in
+  apply)
+    apply "$2"
+    ;;
+  ssh)
+    load_host "$2"
+    exec ssh -p "$HOMICRON_PORT" "$HOMICRON_USER@$HOMICRON_ADDR"
+    ;;
+  *)
+    usage
+    ;;
+esac
