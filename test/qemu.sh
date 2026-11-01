@@ -13,6 +13,7 @@
 #   HOMICRON_VM_CPUS   (8)
 #   HOMICRON_VM_DISK   (100G)
 #   HOMICRON_VM_DISK2  (unset)        size of an optional second disk, for mirror rehearsals
+#   HOMICRON_VM_NIC2   (unset)        yes adds a second NIC with no peer, like an uncabled port
 #   HOMICRON_SSH_PORT  (2222)         host port forwarded to guest port 22
 #   OVMF_CODE          (/usr/share/edk2/x64/OVMF_CODE.4m.fd)
 #   OVMF_VARS          (/usr/share/edk2/x64/OVMF_VARS.4m.fd)
@@ -29,6 +30,7 @@ mem=${HOMICRON_VM_MEM:-16G}
 cpus=${HOMICRON_VM_CPUS:-8}
 disk_size=${HOMICRON_VM_DISK:-100G}
 disk2_size=${HOMICRON_VM_DISK2:-}
+nic2=${HOMICRON_VM_NIC2:-}
 ssh_port=${HOMICRON_SSH_PORT:-2222}
 ovmf_code=${OVMF_CODE:-/usr/share/edk2/x64/OVMF_CODE.4m.fd}
 ovmf_vars=${OVMF_VARS:-/usr/share/edk2/x64/OVMF_VARS.4m.fd}
@@ -67,8 +69,12 @@ fi
 cmd+=(
   -netdev "user,id=n0,hostfwd=tcp::$ssh_port-:22"
   -device "virtio-net-pci,netdev=n0"
-  -nographic -serial mon:stdio
 )
+if [[ $nic2 == yes ]]; then
+  # A socket netdev with no peer never answers DHCP: an uncabled port.
+  cmd+=(-netdev "socket,id=n1,listen=:0" -device "virtio-net-pci,netdev=n1")
+fi
+cmd+=(-nographic -serial mon:stdio)
 if [[ $mode == install ]]; then
   cmd+=(-cdrom "$iso" -boot d)
 fi
@@ -81,7 +87,10 @@ fi
 mkdir -p "$vm_dir"
 if [[ $mode == install && ! -f $iso ]]; then
   printf 'downloading %s\n' "$iso_url"
-  curl -fL -o "$iso" "$iso_url"
+  # Download beside the target and rename on success, so an interrupted
+  # transfer never leaves a truncated file that the check above accepts.
+  curl -fL -o "$iso.part" "$iso_url"
+  mv "$iso.part" "$iso"
 fi
 if [[ ! -f $disk ]]; then
   qemu-img create -f qcow2 "$disk" "$disk_size"
