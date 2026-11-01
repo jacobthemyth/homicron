@@ -23,7 +23,7 @@ setup() {
   run "$STEP"
   [ "$status" -eq 10 ]
   assert_called '^pkg update -v$'
-  refute_called '^pkg install'
+  refute_called '^pkg install -v developer'
 }
 
 @test "update exiting 4 proceeds to install the packages" {
@@ -34,10 +34,10 @@ setup() {
 }
 
 @test "update failing with 1 fails the step" {
-  printf '[[ $1 == update && $2 == -n ]] && exit 0; [[ $1 == update ]] && exit 1; exit 1\n' > "$FAKE_BIN/pkg.script"
+  printf '[[ $1 == update && $2 == -n ]] && exit 0; [[ $1 == install ]] && exit 4; [[ $1 == update ]] && exit 1; exit 1\n' > "$FAKE_BIN/pkg.script"
   run "$STEP"
   [ "$status" -eq 1 ]
-  refute_called '^pkg install'
+  refute_called '^pkg install -v developer'
 }
 
 @test "updates pkg(7) itself before running pkg update" {
