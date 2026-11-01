@@ -38,6 +38,15 @@ apply() {
   local before after status=0
   before=$(boot_environments)
 
+  # pkg update refuses to run while pkg(7) itself is out of date.
+  log "updating pkg(7)"
+  pkg install -v pkg:/package/pkg || status=$?
+  if (( status != 0 && status != 4 )); then
+    log "pkg install pkg:/package/pkg failed with status $status"
+    exit "$status"
+  fi
+  status=0
+
   log "pkg update"
   pkg update -v || status=$?
   case $status in
