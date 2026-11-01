@@ -1,0 +1,5 @@
+_site/
+test/vm/
+*.iso
+*.qcow2
+.superpowers/
