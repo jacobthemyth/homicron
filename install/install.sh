@@ -7,13 +7,15 @@
 #     curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>...
 #
 # Runs install-helios, then seeds the new root (still mounted at /a) with the
-# SSH keys, the first-boot service, and /etc/homicron.conf. Does not reboot.
+# SSH keys, the first-boot service, the dhcpagent DNS hook, the ramdisk's
+# working resolv.conf, and /etc/homicron.conf. Does not reboot.
 #
 set -o errexit -o pipefail -o nounset
 
 base_url=${HOMICRON_BASE_URL:-https://homicron.smithjs.org}
 altroot=${HOMICRON_ALTROOT:-/a}
 install_helios=${HOMICRON_INSTALL_HELIOS:-/usr/bin/install-helios}
+ramdisk_resolv=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
 
 usage() {
   printf 'usage: install <hostname> <disk> [<disk> [<disk>]]\n' >&2
@@ -75,6 +77,7 @@ trap 'rm -rf "$tmp"' EXIT
 files=(
   firstboot/homicron-firstboot
   firstboot/homicron-firstboot.xml
+  firstboot/dhcp-eventhook
   keys/authorized_keys
 )
 
@@ -118,6 +121,20 @@ cp "$tmp/firstboot/homicron-firstboot.xml" "$manifest"
 chmod 0644 "$manifest"
 cp "$tmp/firstboot/homicron-firstboot" "$altroot/usr/lib/homicron-firstboot"
 chmod 0755 "$altroot/usr/lib/homicron-firstboot"
+
+# dhcpagent runs /etc/dhcp/eventhook on every lease event; the hook writes
+# /etc/resolv.conf, which nothing else on Helios does.
+mkdir -p "$altroot/etc/dhcp"
+cp "$tmp/firstboot/dhcp-eventhook" "$altroot/etc/dhcp/eventhook"
+chmod 0755 "$altroot/etc/dhcp/eventhook"
+
+# The typed install line gave the ramdisk a working resolv.conf. Seed the
+# installed root with it as insurance; the hook overwrites it on the first
+# lease.
+if grep -q '^nameserver' "$ramdisk_resolv" 2>/dev/null; then
+  cp "$ramdisk_resolv" "$altroot/etc/resolv.conf"
+  chmod 0644 "$altroot/etc/resolv.conf"
+fi
 
 printf 'HOSTNAME=%s\nBASE_URL=%s\n' "$hostname" "$base_url" > "$altroot/etc/homicron.conf"
 chmod 0644 "$altroot/etc/homicron.conf"

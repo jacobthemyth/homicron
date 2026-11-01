@@ -7,6 +7,8 @@ setup() {
   fakes_setup
   export HOMICRON_BASE_URL=http://site.test HOMICRON_ALTROOT="$BATS_TEST_TMPDIR/a"
   export HOMICRON_INSTALL_HELIOS="$FAKE_BIN/install-helios"
+  export HOMICRON_RESOLV_CONF="$BATS_TEST_TMPDIR/ramdisk-resolv.conf"
+  printf 'nameserver 10.0.2.3\n' > "$HOMICRON_RESOLV_CONF"
   mkdir -p "$HOMICRON_ALTROOT/etc/svc" && : > "$HOMICRON_ALTROOT/etc/svc/repository.db"
   fake_site_setup "$BATS_TEST_TMPDIR/site"
   make_fake install-helios
@@ -96,12 +98,30 @@ file_mode() {
   cmp "$HOMICRON_ALTROOT/root/.ssh/authorized_keys" "$BATS_TEST_TMPDIR/site/keys/authorized_keys"
   [ -x "$HOMICRON_ALTROOT/usr/lib/homicron-firstboot" ]
   [ -f "$HOMICRON_ALTROOT/lib/svc/manifest/site/homicron-firstboot.xml" ]
+  [ -x "$HOMICRON_ALTROOT/etc/dhcp/eventhook" ]
+  [ "$(file_mode "$HOMICRON_ALTROOT/etc/dhcp/eventhook")" = 755 ]
+  cmp "$HOMICRON_ALTROOT/etc/dhcp/eventhook" "$BATS_TEST_DIRNAME/../firstboot/dhcp-eventhook"
+  [ "$(cat "$HOMICRON_ALTROOT/etc/resolv.conf")" = "nameserver 10.0.2.3" ]
   grep -qx 'HOSTNAME=host01' "$HOMICRON_ALTROOT/etc/homicron.conf"
   grep -qx 'BASE_URL=http://site.test' "$HOMICRON_ALTROOT/etc/homicron.conf"
   assert_called "^svccfg import $HOMICRON_ALTROOT/lib/svc/manifest/site/homicron-firstboot.xml$"
   assert_called "^SVCCFG_REPOSITORY=$HOMICRON_ALTROOT/etc/svc/repository.db$"
   [[ "${lines[-1]}" == "install complete; remove the media and run: reboot" ]]
   refute_called '^reboot'
+}
+
+@test "a ramdisk resolv.conf without a nameserver is not copied" {
+  : > "$HOMICRON_RESOLV_CONF"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 0 ]
+  [ ! -e "$HOMICRON_ALTROOT/etc/resolv.conf" ]
+}
+
+@test "a tampered hook fails the checksum before install" {
+  echo tampered >> "$BATS_TEST_TMPDIR/site/firstboot/dhcp-eventhook"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 1 ]
+  refute_called '^install-helios'
 }
 
 @test "propagates install-helios failure" {

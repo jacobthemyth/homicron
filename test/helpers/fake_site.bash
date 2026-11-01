@@ -23,7 +23,7 @@ fake_site_resum() {
   local dir="$1"
   (
     cd "$dir" || return 1
-    _sum_tool firstboot/homicron-firstboot firstboot/homicron-firstboot.xml keys/authorized_keys > SHA256SUMS
+    _sum_tool firstboot/* keys/authorized_keys > SHA256SUMS
   )
 }
 
@@ -31,7 +31,7 @@ fake_site_setup() {
   local dir="$1" root
   root=$(_repo_root)
   mkdir -p "$dir/firstboot" "$dir/keys"
-  cp "$root/firstboot/homicron-firstboot" "$root/firstboot/homicron-firstboot.xml" "$dir/firstboot/"
+  cp "$root"/firstboot/* "$dir/firstboot/"
   cp "$root/keys/authorized_keys" "$dir/keys/"
   fake_site_resum "$dir"
   export FAKE_SITE="$dir"
