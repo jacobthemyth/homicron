@@ -85,15 +85,27 @@ HOMICRON_ADDR=<linux-host> bin/homicron apply vm
 
 ## Confirmed on first install
 
-Facts the design assumed, and what the first real runs showed.
+Facts the design assumed, and what the first real runs showed. "VM" is the
+qemu/KVM rehearsal on 2026-10-31 with `helios-3.0.23976`; the IMB-A1002
+column is filled in after the first physical install.
 
-| Item | Outcome |
-|---|---|
-| `ipadm create-addr -T dhcp` works in the installer ramdisk | |
-| the ramdisk's `curl` trusts the GitHub Pages certificate | |
-| `SVCCFG_REPOSITORY=/a/etc/svc/repository.db svccfg import` enables the first-boot service | |
-| the IMB-A1002 NIC appears as `rge0` | |
-| `network/ssh` is disabled on a fresh install, so first boot must enable it | |
+| Item | VM | IMB-A1002 |
+|---|---|---|
+| `ipadm create-addr -T dhcp` works in the installer ramdisk | yes | |
+| the ramdisk's `curl` trusts the GitHub Pages certificate | | |
+| `SVCCFG_REPOSITORY=/a/etc/svc/repository.db svccfg import` enables the first-boot service | yes, `general/enabled true` before reboot | |
+| the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
+| `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
+
+Findings from the rehearsal that changed the code:
+
+- `dhcpagent` records the DNS servers from the lease but never writes
+  `/etc/resolv.conf` (that is nwam's job). First boot now writes it from
+  `dhcpinfo` when the file is absent.
+- The SMF method PATH is `/usr/sbin:/usr/bin`; `dhcpinfo` lives in `/sbin`.
+- `profiles <user>` indents each profile name, so an exact-line match fails.
+- A fresh install's `pkg update` exits 1 with "pkg(7) appears to be out of
+  date" until `pkg install pkg:/package/pkg` runs.
 
 ## Development
 

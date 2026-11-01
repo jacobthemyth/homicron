@@ -51,6 +51,7 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
   assert_called 'root@box.local reboot$'
+  assert_called '^ssh .*-o ServerAliveInterval=[0-9]+ .*root@box.local reboot$'
   [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
   assert_called '20-b.sh$'
 }

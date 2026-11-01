@@ -104,7 +104,10 @@ apply() {
     run_step "$step" || status=$?
     if (( status == 10 )); then
       printf '%s requested a reboot\n' "$step"
-      remote reboot || true
+      # Keepalives: a NAT or port forward (qemu user networking, some
+      # firewalls) never closes the connection when the box goes down, and a
+      # plain ssh would hang here forever.
+      ssh -p "$HOMICRON_PORT" -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "root@$HOMICRON_ADDR" reboot || true
       wait_for_ssh
       status=0
       run_step "$step" || status=$?
