@@ -4,8 +4,8 @@ STEP="$BATS_TEST_DIRNAME/../host/60-voxel.sh"
 
 setup() {
   fakes_setup
-  export HOMICRON_USER=jacob HOMICRON_HOME="$BATS_TEST_TMPDIR/home" VOXEL_REF=main
-  SRC="$HOMICRON_HOME/jacob/src/voxel"
+  export HOMICRON_USER=vmuser HOMICRON_HOME="$BATS_TEST_TMPDIR/home" VOXEL_REF=main
+  SRC="$HOMICRON_HOME/vmuser/src/voxel"
   # su logs the -c command and runs it, so the fake git below is exercised.
   make_fake su
   printf 'while [[ $1 != -c ]]; do shift; done; printf "%%s\\n" "$2" >> "$FAKE_LOG.su"; HOME="$HOMICRON_HOME/$HOMICRON_USER" bash -c "$2"\n' > "$FAKE_BIN/su.script"

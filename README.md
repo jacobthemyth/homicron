@@ -1,50 +1,28 @@
 # homicron
 
-homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's
-illumos distribution, on a bare-metal x86 machine and prepares it to run
-[voxel](https://github.com/oxidecomputer/voxel), Oxide's emulated rack lab.
-It is bash in three stages, served by GitHub Pages at
-<https://homicron.smithjs.org>.
-
-Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/specs/2026-10-31-homicron-design.md).
+homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's illumos distribution, on a bare-metal x86 machine and prepares it to run [voxel](https://github.com/oxidecomputer/voxel), Oxide's emulated rack lab. It is bash in three stages, served by GitHub Pages at https://homicron.smithjs.org.
 
 ## Install a machine
 
-1. Attach the stock Helios installer ISO as virtual media and boot it. Use
-   `helios-install-vga.iso` for a KVM with a display, or `helios-install-ttya.iso`
-   for a serial console. The ISOs are at <https://pkg.oxide.computer/install/latest/>.
-2. At the installer's root prompt, find the NIC with `dladm show-phys` and the
-   disk with `diskinfo`.
-3. Type one line:
+1. Attach the stock Helios installer ISO as virtual media and boot it. Use `helios-install-vga.iso` for a KVM with a display, or `helios-install-ttya.iso` for a serial console. The ISOs are at https://pkg.oxide.computer/install/latest/.
+2. At the installer's root prompt, find the NIC with `dladm show-phys` and the disk with `diskinfo`.
+3. Run the following command at the prompt to enable DHCP and run this repo's install script.
 
    ```
-   ipadm create-addr -T dhcp rge0/v4 && echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>
+   ipadm create-addr -T dhcp rge0/v4 && echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk> [<disk> [<disk]]
    ```
 
-   One disk makes a single-disk pool, two make a mirror, three make raidz1.
-   The `resolv.conf` step is required: the installer ramdisk ships an empty
-   `/etc/resolv.conf` and DHCP does not fill it, so without it `curl` cannot
-   resolve the name. Downloading to a file first means a failed download
-   stops the line instead of feeding an empty script to `bash`. If the
-   install line stops with a checksum mismatch minutes after a push, the
-   site cache is still serving an old file. Wait ten minutes and retry.
-4. When it prints `install complete; remove the media and run: reboot`,
-   remove the media and run `reboot`.
-5. On first boot the machine prints its address on the console. It has sshd
-   and mDNS enabled and root accepts the keys in `keys/authorized_keys`. A
-   dhcpagent hook writes `/etc/resolv.conf` from every lease.
+   One disk makes a single-disk pool, two make a mirror, three make raidz1. The `resolv.conf` step is required: the installer ramdisk ships an empty `/etc/resolv.conf` and DHCP does not fill it, so without it `curl` cannot resolve the name. Downloading to a file first means a failed download stops the line instead of feeding an empty script to `bash`.
+4. When it prints `install complete; remove the media and run: reboot`, do so.
+5. On first boot the machine prints its address on the console. It has sshd and mDNS enabled and root accepts the keys in `keys/authorized_keys`. A dhcpagent hook writes `/etc/resolv.conf` from every lease.
 6. Create `hosts/<hostname>.env` (see [hosts/README.md](hosts/README.md)) and run:
 
    ```
    bin/homicron apply <hostname>
    ```
 
-   The runner rsyncs `host/` to the machine and runs each step over ssh. A
-   step that updates the operating system asks for a reboot; the runner
-   reboots, waits, and continues. Run `apply` again after any failure; steps
-   that are already done skip themselves.
-7. Build the voxel images on the machine (30 to 45 minutes). The binary is
-   not on the PATH, so the command names its path:
+   The runner rsyncs `host/` to the machine and runs each step over ssh. A step that updates the operating system asks for a reboot; the runner reboots, waits, and continues. Run `apply` again after any failure; steps that are already done skip themselves.
+7. Build the voxel images on the machine (30 to 45 minutes). The binary is not on the PATH, so the command names its path:
 
    ```
    bin/homicron ssh <hostname>
@@ -53,11 +31,7 @@ Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/
 
 ## Add a mirror disk later
 
-Start with one disk and convert the root pool to a mirror while the machine
-runs. Rehearsed on the VM on 2026-10-31: `zpool attach` labeled the new disk
-with the same layout as the first, including the EFI system partition, the
-resilver finished, `bootadm` installed the loader on both disks, and the
-machine then booted from the second disk alone.
+Start with one disk and convert the root pool to a mirror while the machine runs.
 
 ```
 zpool attach rpool c1t0d0 c2t0d0        # existing disk, then the new one
@@ -65,8 +39,7 @@ zpool status rpool                      # wait until "resilvered ... with 0 erro
 bootadm install-bootloader -M -P rpool  # loader onto every disk in the pool
 ```
 
-Confirm by booting once with the first disk detached. The pool reports
-DEGRADED until the disk is back.
+Confirm by booting once with the first disk detached. The pool reports DEGRADED until the disk is back.
 
 ## What the stages do
 
@@ -76,13 +49,9 @@ DEGRADED until the disk is back.
 | `firstboot/` | first boot, once | DHCP on every physical NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the address, disable itself |
 | `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, `voxel.toml` |
 
-Every host step checks its own end state first and does nothing when it
-already holds. The second `apply` on a finished machine changes nothing.
-
 ## Rehearse in a VM
 
-The whole flow runs in qemu/KVM on an x86 Linux host. An Apple Silicon Mac
-cannot run x86 Helios at a useful speed.
+The whole flow runs in qemu/KVM on an x86 Linux host.
 
 On the Linux host, in a clone of this repository:
 
@@ -94,64 +63,17 @@ test/serve.sh 8000
 test/qemu.sh install
 ```
 
-Set `HOMICRON_VM_NIC2=yes` to add an uncabled second NIC like the IMB-A1002.
-
 At the installer prompt (the NIC is `vioif0` under qemu):
 
 ```
-ipadm create-addr -T dhcp vioif0/v4 && echo "nameserver $(dhcpinfo -i vioif0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i http://10.0.2.2:8000/install && HOMICRON_BASE_URL=http://10.0.2.2:8000 bash /tmp/i vm c1t0d0
+ipadm create-addr -T dhcp vioif0/v4 && echo "nameserver $(dhcpinfo -i vioif0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i http://<host-ip>:8000/install && HOMICRON_BASE_URL=http://<host-ip>:8000 bash /tmp/i vm c1t0d0
 ```
 
-Then `reboot`, quit qemu with `Ctrl-a x` when the loader appears, and boot
-the installed disk with `test/qemu.sh boot`. ssh is forwarded to port 2222
-on the Linux host, so from the laptop:
+Then `reboot`, quit qemu with `Ctrl-a x` when the loader appears, and boot the installed disk with `test/qemu.sh boot`. ssh is forwarded to port 2222 on the Linux host, so if the Linux host is remote, run apply with the following:
 
 ```
-HOMICRON_ADDR=<linux-host> bin/homicron apply vm
+HOMICRON_ADDR=<host-ip> bin/homicron apply vm
 ```
-
-## Confirmed on first install
-
-Facts the design assumed, and what the first real runs showed. "VM" is the
-qemu/KVM rehearsal on 2026-10-31 with `helios-3.0.23976`; the IMB-A1002
-column is filled in after the first physical install.
-
-| Item | VM | IMB-A1002 |
-|---|---|---|
-| `ipadm create-addr -T dhcp` works in the installer ramdisk | yes | |
-| the ramdisk's `curl` trusts the GitHub Pages certificate | yes (`ssl_verify_result` 0, HTTP 200) | |
-| `SVCCFG_REPOSITORY=/a/etc/svc/repository.db svccfg import` enables the first-boot service | yes, `general/enabled true` before reboot | |
-| the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
-| `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
-| the box answers as `<hostname>.local` through `network/dns/multicast`, so `HOMICRON_ADDR` can stay empty | not testable (qemu user networking carries no multicast) | |
-| `ipadm create-addr -T dhcp -w 0` is accepted and dhcpagent keeps trying in the background | yes: both NICs requested in under a second, the uncabled one shows `?` as its address until a lease | |
-| dhcpagent runs `/etc/dhcp/eventhook` on BOUND, so `/etc/resolv.conf` is written from the lease | yes: the hook logged `wrote /etc/resolv.conf` once from first boot and once from dhcpagent, file mode 0644 | |
-
-Findings from the rehearsal that changed the code:
-
-- `dhcpagent` records the DNS servers from the lease but never writes
-  `/etc/resolv.conf` (that is nwam's job). A dhcpagent event hook, seeded
-  by the installer, writes it on every lease. The typed install line writes
-  it in the ramdisk, where the file exists but is empty.
-- The SMF method PATH is `/usr/sbin:/usr/bin`; `dhcpinfo` lives in `/sbin`.
-- `profiles <user>` indents each profile name, so an exact-line match fails.
-- A fresh install's `pkg update` exits 1 with "pkg(7) appears to be out of
-  date" until `pkg install pkg:/package/pkg` runs.
-
-Rehearsed again on 2026-11-01 after the review fixes, with a second
-uncabled NIC and the install line pointed at the live site:
-
-- `ipadm show-addr -p -o addr` prints `?` for the uncabled NIC's address
-  object. First boot matches a dotted address, so the `?` is ignored.
-- `pkg update` created a backup boot environment, `helios-backup-1` with no
-  active flags, next to the activated `helios-1`. The reboot check reads the
-  flags, so the backup did not cause a second reboot.
-- dhcpagent ran the hook again after the pkg reboot, and `/etc/resolv.conf`
-  came back with mode 0644.
-- A guest reset during the cargo build made `apply` exit with "cannot reach"
-  20 seconds later.
-- The first `apply`, voxel build included, took about ten minutes on an
-  8-vCPU guest. A second `apply` changed nothing.
 
 ## Development
 
@@ -160,13 +82,4 @@ test/lint.sh        shellcheck and bash -n over every script
 test/run-tests.sh   bats tests; target commands are faked on PATH
 ```
 
-CI runs both on every push and deploys the site from `main` with
-`pages/build-site.sh`. The custom domain was set with:
-
-```
-gh api -X PUT repos/jacobthemyth/homicron/pages -f cname=homicron.smithjs.org
-gh api -X PUT repos/jacobthemyth/homicron/pages -F https_enforced=true
-```
-
-Nothing private belongs in this repository. Host addresses are passed in the
-environment; see [hosts/README.md](hosts/README.md).
+CI runs both on every push and deploys the site from `main` with `pages/build-site.sh`.

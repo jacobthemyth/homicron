@@ -142,7 +142,7 @@ In `test/homicron.bats`, change the three anchored lines:
 assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 10-a.sh$'
 assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 20-b.sh$'
 # line 77
-assert_called '^ssh -p 2222 .*jacob@box.local$'
+assert_called '^ssh -p 2222 .*vmuser@box.local$'
 ```
 
 Add:
@@ -209,7 +209,7 @@ git commit -m "Runner: one ssh option array with keepalives, rsync failures name
 ```bash
 @test "malformed hosts lines exit 2 with the line number before rsync" {
   for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r'; do
-    printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
+    printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
     run "$REPO/bin/homicron" apply bad
     [ "$status" -eq 2 ]
     [[ "$output" == *"bad.env line 3"* ]]
@@ -603,7 +603,7 @@ In setup add `export HOMICRON_ROOT_HOME="$BATS_TEST_TMPDIR/root"` and `mkdir -p 
   done
   refute_called '^useradd'
   refute_called '^zfs create'
-  [ ! -e "$HOMICRON_HOME/jacob/.ssh/authorized_keys" ]
+  [ ! -e "$HOMICRON_HOME/vmuser/.ssh/authorized_keys" ]
 }
 
 @test "converges root's authorized_keys as well as the user's" {
@@ -617,7 +617,7 @@ In setup add `export HOMICRON_ROOT_HOME="$BATS_TEST_TMPDIR/root"` and `mkdir -p 
   make_fake getent 2
   run "$STEP"
   refute_called '^chown -R'
-  assert_called "^chown jacob:staff $HOMICRON_HOME/jacob $HOMICRON_HOME/jacob/.ssh $HOMICRON_HOME/jacob/.ssh/authorized_keys$"
+  assert_called "^chown vmuser:staff $HOMICRON_HOME/vmuser $HOMICRON_HOME/vmuser/.ssh $HOMICRON_HOME/vmuser/.ssh/authorized_keys$"
 }
 ```
 

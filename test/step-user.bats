@@ -4,7 +4,7 @@ STEP="$BATS_TEST_DIRNAME/../host/10-user.sh"
 
 setup() {
   fakes_setup
-  export HOMICRON_USER=jacob HOMICRON_UID=501
+  export HOMICRON_USER=vmuser HOMICRON_UID=501
   export HOMICRON_DIR="$BATS_TEST_TMPDIR/opt" HOMICRON_ETC="$BATS_TEST_TMPDIR/etc" HOMICRON_HOME="$BATS_TEST_TMPDIR/home"
   export HOMICRON_ROOT_HOME="$BATS_TEST_TMPDIR/root"
   mkdir -p "$HOMICRON_DIR" "$HOMICRON_ETC/default" "$HOMICRON_HOME" "$HOMICRON_ROOT_HOME"
@@ -14,11 +14,11 @@ setup() {
 }
 
 @test "does nothing when the end state already holds" {
-  printf 'echo "jacob:x:501:10::/home/jacob:/bin/bash"\n' > "$FAKE_BIN/getent.script"
-  printf 'printf "jacob:\\n          Primary Administrator\\n          Basic Solaris User\\n"\n' > "$FAKE_BIN/profiles.script"
+  printf 'echo "vmuser:x:501:10::/home/vmuser:/bin/bash"\n' > "$FAKE_BIN/getent.script"
+  printf 'printf "vmuser:\\n          Primary Administrator\\n          Basic Solaris User\\n"\n' > "$FAKE_BIN/profiles.script"
   printf 'echo "basic,net_icmpaccess"\n' > "$FAKE_BIN/userattr.script"
-  mkdir -p "$HOMICRON_HOME/jacob/.ssh" "$HOMICRON_ROOT_HOME/.ssh"
-  cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/jacob/.ssh/"
+  mkdir -p "$HOMICRON_HOME/vmuser/.ssh" "$HOMICRON_ROOT_HOME/.ssh"
+  cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/vmuser/.ssh/"
   cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_ROOT_HOME/.ssh/"
   printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
   run "$STEP"
@@ -34,22 +34,22 @@ setup() {
   printf '[[ $1 == create ]] && exit 0; exit 1\n' > "$FAKE_BIN/zfs.script"
   run "$STEP"
   [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
-  assert_called '^zfs create -p -o mountpoint=/home/jacob rpool/home/jacob$'
-  assert_called '^useradd -u 501 -g staff -d /home/jacob -s /bin/bash -P Primary Administrator jacob$'
-  assert_called '^passwd -N jacob$'
-  assert_called '^usermod -K defaultpriv=basic,net_icmpaccess jacob$'
+  assert_called '^zfs create -p -o mountpoint=/home/vmuser rpool/home/vmuser$'
+  assert_called '^useradd -u 501 -g staff -d /home/vmuser -s /bin/bash -P Primary Administrator vmuser$'
+  assert_called '^passwd -N vmuser$'
+  assert_called '^usermod -K defaultpriv=basic,net_icmpaccess vmuser$'
   grep -q '/opt/ooce/bin:/opt/ooce/sbin' "$HOMICRON_ETC/default/login"
   [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/login")" -eq 1 ]
-  cmp "$HOMICRON_HOME/jacob/.ssh/authorized_keys" "$HOMICRON_DIR/authorized_keys"
+  cmp "$HOMICRON_HOME/vmuser/.ssh/authorized_keys" "$HOMICRON_DIR/authorized_keys"
 }
 
 @test "adds only what is missing when the user exists" {
-  printf 'echo "jacob:x:501:10::/home/jacob:/bin/bash"\n' > "$FAKE_BIN/getent.script"
-  printf 'printf "jacob:\\n          Primary Administrator\\n"\n' > "$FAKE_BIN/profiles.script"
+  printf 'echo "vmuser:x:501:10::/home/vmuser:/bin/bash"\n' > "$FAKE_BIN/getent.script"
+  printf 'printf "vmuser:\\n          Primary Administrator\\n"\n' > "$FAKE_BIN/profiles.script"
   printf 'echo "basic"\n' > "$FAKE_BIN/userattr.script"
   run "$STEP"
   refute_called '^useradd'
-  assert_called '^usermod -K defaultpriv=basic,net_icmpaccess jacob$'
+  assert_called '^usermod -K defaultpriv=basic,net_icmpaccess vmuser$'
 }
 
 @test "refuses an empty or comment-only keys file before any change" {
@@ -62,7 +62,7 @@ setup() {
   done
   refute_called '^useradd'
   refute_called '^zfs create'
-  [ ! -e "$HOMICRON_HOME/jacob/.ssh/authorized_keys" ]
+  [ ! -e "$HOMICRON_HOME/vmuser/.ssh/authorized_keys" ]
 }
 
 @test "an indented key line counts as a key, as sshd reads it" {
@@ -84,7 +84,7 @@ setup() {
   make_fake getent 2
   run "$STEP"
   refute_called '^chown -R'
-  assert_called "^chown jacob:staff $HOMICRON_HOME/jacob $HOMICRON_HOME/jacob/.ssh $HOMICRON_HOME/jacob/.ssh/authorized_keys$"
+  assert_called "^chown vmuser:staff $HOMICRON_HOME/vmuser $HOMICRON_HOME/vmuser/.ssh $HOMICRON_HOME/vmuser/.ssh/authorized_keys$"
 }
 
 @test "uncomments a commented PATH line in /etc/default/login" {

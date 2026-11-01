@@ -209,7 +209,7 @@ maintenance, because that would hide the console login.
 default in `bin/homicron` except the first two.
 
 ```
-HOMICRON_USER=jacob          login to create; required
+HOMICRON_USER=vmuser         login to create; required
 HOMICRON_UID=501             match the laptop uid, as helios-engvm gen_userdata.sh does; required
 HOMICRON_ADDR=               ssh target; default <name>.local
 HOMICRON_PORT=22             ssh port; the qemu test VM forwards a high port

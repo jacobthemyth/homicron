@@ -8,7 +8,7 @@ setup() {
   mkdir -p "$REPO/hosts" "$REPO/host" "$REPO/keys" "$REPO/bin"
   if [[ -f $BIN ]]; then cp "$BIN" "$REPO/bin/homicron"; fi
   : > "$REPO/keys/authorized_keys"
-  printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\nHOMICRON_PORT=2222\n' > "$REPO/hosts/box.env"
+  printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\nHOMICRON_PORT=2222\n' > "$REPO/hosts/box.env"
   printf '#!/bin/bash\n' > "$REPO/host/10-a.sh"
   printf '#!/bin/bash\n' > "$REPO/host/20-b.sh"
   make_fake rsync
@@ -20,7 +20,7 @@ setup() {
 @test "missing host file or required variable exits 2 before rsync" {
   run "$REPO/bin/homicron" apply nope
   [ "$status" -eq 2 ]
-  printf 'HOMICRON_USER=jacob\n' > "$REPO/hosts/bad.env"
+  printf 'HOMICRON_USER=vmuser\n' > "$REPO/hosts/bad.env"
   run "$REPO/bin/homicron" apply bad
   [ "$status" -eq 2 ]
   refute_called '^rsync'
@@ -117,7 +117,7 @@ EOS
 }
 
 @test "an unknown variable in the hosts file exits 2 with the line number before rsync" {
-  printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\nVOXEL_SLED=8\n' > "$REPO/hosts/typo.env"
+  printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\nVOXEL_SLED=8\n' > "$REPO/hosts/typo.env"
   run "$REPO/bin/homicron" apply typo
   [ "$status" -eq 2 ]
   [[ "$output" == *"typo.env line 3"* ]]
@@ -143,8 +143,8 @@ EOS
 
 @test "ssh subcommand uses the user and port, without keepalives" {
   run "$REPO/bin/homicron" ssh box
-  assert_called '^ssh -p 2222 .*jacob@box.local$'
-  refute_called 'ServerAlive.*jacob@box.local$'
+  assert_called '^ssh -p 2222 .*vmuser@box.local$'
+  refute_called 'ServerAlive.*vmuser@box.local$'
 }
 
 @test "every ssh and the rsync transport carry keepalives" {
@@ -173,13 +173,13 @@ EOS
   [ "$status" -eq 0 ]
   grep -qx 'SWAP_SIZE=16G' "$BATS_TEST_TMPDIR/sent.env"
   grep -qx 'VOXEL_REF=v0.9' "$BATS_TEST_TMPDIR/sent.env"
-  grep -qx 'HOMICRON_USER=jacob' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'HOMICRON_USER=vmuser' "$BATS_TEST_TMPDIR/sent.env"
   grep -qx 'FALCON_DATASET=' "$BATS_TEST_TMPDIR/sent.env"
 }
 
 @test "malformed hosts lines exit 2 with the line number before rsync" {
   for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r' 'HOMICRON_ADDR=box;reboot' 'VOXEL_REF=main|true' 'FALCON_DATASET=~/falcon'; do
-    printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
+    printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
     run "$REPO/bin/homicron" apply bad
     [ "$status" -eq 2 ]
     [[ "$output" == *"bad.env line 3"* ]]

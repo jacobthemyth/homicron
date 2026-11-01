@@ -4,9 +4,9 @@ STEP="$BATS_TEST_DIRNAME/../host/70-voxel-conf.sh"
 
 setup() {
   fakes_setup
-  export HOMICRON_USER=jacob HOMICRON_HOME="$BATS_TEST_TMPDIR/home" VOXEL_SLEDS=4 VOXEL_SLED_MEMORY_GB=8
+  export HOMICRON_USER=vmuser HOMICRON_HOME="$BATS_TEST_TMPDIR/home" VOXEL_SLEDS=4 VOXEL_SLED_MEMORY_GB=8
   export FALCON_DATASET=
-  SRC="$HOMICRON_HOME/jacob/src/voxel"
+  SRC="$HOMICRON_HOME/vmuser/src/voxel"
   make_fake su
   printf 'while [[ $1 != -c ]]; do shift; done; printf "%%s\\n" "$2" >> "$FAKE_LOG.su"; HOME="$HOMICRON_HOME/$HOMICRON_USER" bash -c "$2"\n' > "$FAKE_BIN/su.script"
   # A fake voxel binary at the real path: `config get KEY` and `config set KEY VALUE` over a flat file.
