@@ -4,7 +4,8 @@
 #
 # End state: $HOMICRON_USER exists with uid $HOMICRON_UID and home on
 # rpool/home/$HOMICRON_USER, holds the Primary Administrator profile and the
-# net_icmpaccess privilege, has the repository's authorized_keys, and
+# net_icmpaccess privilege, has the repository's authorized_keys, root has
+# the same authorized_keys (the runner logs in as root), and
 # /etc/default/login puts /opt/ooce on the PATH.
 #
 set -o errexit -o pipefail -o nounset
@@ -13,6 +14,7 @@ source "$(dirname "$0")/lib.sh"
 
 etc=${HOMICRON_ETC:-/etc}
 home_root=${HOMICRON_HOME:-/home}
+root_home=${HOMICRON_ROOT_HOME:-/root}
 user=$HOMICRON_USER
 home="$home_root/$user"
 real_home="/home/$user"
@@ -40,8 +42,17 @@ has_icmp_priv() {
   userattr defaultpriv "$user" 2>/dev/null | grep -q 'net_icmpaccess'
 }
 
+# A line that is not blank and not a comment is a key.
+keys_present() {
+  grep -Eq '^[^#[:space:]]' "$keys_src"
+}
+
 keys_match() {
   cmp -s "$keys_src" "$home/.ssh/authorized_keys" 2>/dev/null
+}
+
+root_keys_match() {
+  cmp -s "$keys_src" "$root_home/.ssh/authorized_keys" 2>/dev/null
 }
 
 path_has_ooce() {
@@ -49,7 +60,7 @@ path_has_ooce() {
 }
 
 check() {
-  user_exists && dataset_exists && has_profile && has_icmp_priv && keys_match && path_has_ooce
+  user_exists && dataset_exists && has_profile && has_icmp_priv && keys_match && root_keys_match && path_has_ooce
 }
 
 apply() {
@@ -78,7 +89,17 @@ apply() {
     cp "$keys_src" "$home/.ssh/authorized_keys"
     chmod 0700 "$home" "$home/.ssh"
     chmod 0600 "$home/.ssh/authorized_keys"
-    chown -R "$user:staff" "$home"
+    # The three paths this step creates; the home itself is a root-owned
+    # ZFS mountpoint until now. Not -R: the home grows large.
+    chown "$user:staff" "$home" "$home/.ssh" "$home/.ssh/authorized_keys"
+  fi
+
+  if ! root_keys_match; then
+    log "installing authorized_keys for root"
+    mkdir -p "$root_home/.ssh"
+    cp "$keys_src" "$root_home/.ssh/authorized_keys"
+    chmod 0700 "$root_home/.ssh"
+    chmod 0600 "$root_home/.ssh/authorized_keys"
   fi
 
   if ! path_has_ooce; then
@@ -95,5 +116,11 @@ apply() {
     mv "$login_defaults.homicron" "$login_defaults"
   fi
 }
+
+# An empty keys file would lock root and the user out. Refuse before check.
+if ! keys_present; then
+  log "$keys_src has no key; refusing to change $user or root"
+  exit 1
+fi
 
 step_main

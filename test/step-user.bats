@@ -6,7 +6,8 @@ setup() {
   fakes_setup
   export HOMICRON_USER=jacob HOMICRON_UID=501
   export HOMICRON_DIR="$BATS_TEST_TMPDIR/opt" HOMICRON_ETC="$BATS_TEST_TMPDIR/etc" HOMICRON_HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOMICRON_DIR" "$HOMICRON_ETC/default" "$HOMICRON_HOME"
+  export HOMICRON_ROOT_HOME="$BATS_TEST_TMPDIR/root"
+  mkdir -p "$HOMICRON_DIR" "$HOMICRON_ETC/default" "$HOMICRON_HOME" "$HOMICRON_ROOT_HOME"
   echo 'ssh-ed25519 AAAA test' > "$HOMICRON_DIR/authorized_keys"
   printf 'PATH=/usr/bin:/usr/sbin\n' > "$HOMICRON_ETC/default/login"
   for c in zfs useradd usermod passwd profiles userattr getent chown chmod; do make_fake "$c"; done
@@ -16,8 +17,9 @@ setup() {
   printf 'echo "jacob:x:501:10::/home/jacob:/bin/bash"\n' > "$FAKE_BIN/getent.script"
   printf 'printf "jacob:\\n          Primary Administrator\\n          Basic Solaris User\\n"\n' > "$FAKE_BIN/profiles.script"
   printf 'echo "basic,net_icmpaccess"\n' > "$FAKE_BIN/userattr.script"
-  mkdir -p "$HOMICRON_HOME/jacob/.ssh"
+  mkdir -p "$HOMICRON_HOME/jacob/.ssh" "$HOMICRON_ROOT_HOME/.ssh"
   cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/jacob/.ssh/"
+  cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_ROOT_HOME/.ssh/"
   printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
   run "$STEP"
   [ "$status" -eq 0 ]
@@ -48,6 +50,33 @@ setup() {
   run "$STEP"
   refute_called '^useradd'
   assert_called '^usermod -K defaultpriv=basic,net_icmpaccess jacob$'
+}
+
+@test "refuses an empty or comment-only keys file before any change" {
+  make_fake getent 2
+  for content in '' $'# nothing here\n\n'; do
+    printf '%s' "$content" > "$HOMICRON_DIR/authorized_keys"
+    run "$STEP"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no key"* ]]
+  done
+  refute_called '^useradd'
+  refute_called '^zfs create'
+  [ ! -e "$HOMICRON_HOME/jacob/.ssh/authorized_keys" ]
+}
+
+@test "converges root's authorized_keys as well as the user's" {
+  make_fake getent 2
+  run "$STEP"
+  cmp "$HOMICRON_ROOT_HOME/.ssh/authorized_keys" "$HOMICRON_DIR/authorized_keys"
+  assert_called "^chmod 0600 .*/root/.ssh/authorized_keys$"
+}
+
+@test "chown is not recursive" {
+  make_fake getent 2
+  run "$STEP"
+  refute_called '^chown -R'
+  assert_called "^chown jacob:staff $HOMICRON_HOME/jacob $HOMICRON_HOME/jacob/.ssh $HOMICRON_HOME/jacob/.ssh/authorized_keys$"
 }
 
 @test "uncomments a commented PATH line in /etc/default/login" {
