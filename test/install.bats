@@ -59,6 +59,23 @@ file_mode() {
   echo tampered >> "$BATS_TEST_TMPDIR/site/firstboot/homicron-firstboot"
   run "$SCRIPT" host01 c1t0d0
   [ "$status" -eq 1 ]
+  [[ "$output" == *"retry"* ]]
+  refute_called '^install-helios'
+}
+
+@test "accepts a keys file whose only key is a hardware-backed sk- key" {
+  printf 'sk-ssh-ed25519@openssh.com AAAA test\n' > "$BATS_TEST_TMPDIR/site/keys/authorized_keys"
+  fake_site_resum "$BATS_TEST_TMPDIR/site"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 0 ]
+  assert_called '^install-helios'
+}
+
+@test "a comment-only keys file still counts as no key" {
+  printf '# keys go here\n' > "$BATS_TEST_TMPDIR/site/keys/authorized_keys"
+  fake_site_resum "$BATS_TEST_TMPDIR/site"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 1 ]
   refute_called '^install-helios'
 }
 

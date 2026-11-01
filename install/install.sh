@@ -86,11 +86,13 @@ for f in "${files[@]}"; do
   expected=$(awk -v f="$f" '$2 == f { print $1 }' "$tmp/SHA256SUMS")
   actual=$(sum_of "$tmp/$f")
   if [[ -z $expected || $expected != "$actual" ]]; then
-    fail "checksum mismatch for $f"
+    fail "checksum mismatch for $f (the site cache can serve an old file for ten minutes after a deploy; retry then)"
   fi
 done
 
-if ! grep -Eq '^(ssh|ecdsa)-' "$tmp/keys/authorized_keys"; then
+# Any line that is not blank and not a comment is a key: sshd accepts
+# sk- key types and option-prefixed lines as well as ssh- and ecdsa-.
+if ! grep -Eq '^[^#[:space:]]' "$tmp/keys/authorized_keys"; then
   fail "authorized_keys contains no key; refusing to install a machine nobody can log in to"
 fi
 
