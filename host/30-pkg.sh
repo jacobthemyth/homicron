@@ -74,6 +74,11 @@ apply() {
       log "pkg install failed with status $status"
       exit "$status"
     fi
+    after=$(boot_environments)
+    if [[ $before != "$after" ]]; then
+      log "package install created a new boot environment; reboot required"
+      exit 10
+    fi
   fi
 }
 

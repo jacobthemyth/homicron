@@ -32,7 +32,7 @@ setup() {
   printf '[[ $1 == create ]] && exit 0; exit 1\n' > "$FAKE_BIN/zfs.script"
   run "$STEP"
   [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
-  assert_called '^zfs create -o mountpoint=/home/jacob rpool/home/jacob$'
+  assert_called '^zfs create -p -o mountpoint=/home/jacob rpool/home/jacob$'
   assert_called '^useradd -u 501 -g staff -d /home/jacob -s /bin/bash -P Primary Administrator jacob$'
   assert_called '^passwd -N jacob$'
   assert_called '^usermod -K defaultpriv=basic,net_icmpaccess jacob$'
@@ -48,4 +48,13 @@ setup() {
   run "$STEP"
   refute_called '^useradd'
   assert_called '^usermod -K defaultpriv=basic,net_icmpaccess jacob$'
+}
+
+@test "uncomments a commented PATH line in /etc/default/login" {
+  printf '# comment\n#PATH=/usr/bin:\n#SUPATH=/usr/sbin:/usr/bin\n' > "$HOMICRON_ETC/default/login"
+  make_fake getent 2
+  run "$STEP"
+  [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/login")" -eq 1 ]
+  grep -q '^PATH=/usr/bin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/login"
+  grep -q '^#SUPATH=' "$HOMICRON_ETC/default/login"
 }

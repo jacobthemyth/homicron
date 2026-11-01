@@ -10,7 +10,7 @@ setup() {
   mkdir -p "$HOMICRON_ALTROOT/etc/svc" && : > "$HOMICRON_ALTROOT/etc/svc/repository.db"
   fake_site_setup "$BATS_TEST_TMPDIR/site"
   make_fake install-helios
-  make_fake diskinfo 0 $'c1t0d0\nc2t0d0'
+  make_fake diskinfo 0 $'SCSI\tc1t0d0\tVirtio\tBlock Device\t100.00 GiB\tno\tno\nNVME\tc2t0d0\tVirtio\tBlock Device\t100.00 GiB\tno\tno'
   make_fake svccfg
 }
 
@@ -35,6 +35,14 @@ file_mode() {
   run "$SCRIPT" host01 a b c d
   [ "$status" -eq 2 ]
   run "$SCRIPT" host01 c9t9d9
+  [ "$status" -eq 2 ]
+  refute_called '^install-helios'
+}
+
+@test "rejects a diskinfo TYPE word as a disk name" {
+  run "$SCRIPT" host01 SCSI
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" host01 NVME
   [ "$status" -eq 2 ]
   refute_called '^install-helios'
 }

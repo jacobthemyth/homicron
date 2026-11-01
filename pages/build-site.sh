@@ -9,7 +9,7 @@
 #
 set -o errexit -o pipefail -o nounset
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd "$(dirname "$0")/.." && pwd -P)
 out=${1:-"$root/_site"}
 
 sum_tool() {
@@ -20,6 +20,14 @@ sum_tool() {
   fi
 }
 
+# Refuse to empty the repository itself or any directory above it. A
+# directory that does not exist yet cannot contain the repository.
+if canon=$(cd "$out" 2>/dev/null && pwd -P); then
+  if [[ $canon == / || $root == "$canon" || $root == "$canon"/* ]]; then
+    printf 'build-site: refusing to use %s as the output directory\n' "$out" >&2
+    exit 2
+  fi
+fi
 rm -rf "$out"
 mkdir -p "$out/firstboot" "$out/keys"
 

@@ -48,3 +48,11 @@ setup() {
   first_update=$(grep -n '^pkg update -v$' "$FAKE_LOG" | head -1 | cut -d: -f1)
   [ "$first_install" -lt "$first_update" ]
 }
+
+@test "exits 10 when installing the developer packages created a new boot environment" {
+  printf '[[ $1 == update ]] && exit 4; [[ $1 == list ]] && exit 1; exit 0\n' > "$FAKE_BIN/pkg.script"
+  printf 'if grep -q "^pkg install -v developer" "$FAKE_LOG"; then printf "helios\\nhelios-1\\n"; else echo helios; fi\n' > "$FAKE_BIN/beadm.script"
+  run "$STEP"
+  [ "$status" -eq 10 ]
+  assert_called "^pkg install -v $PKGS$"
+}

@@ -23,3 +23,16 @@ setup() { OUT="$BATS_TEST_TMPDIR/site"; }
   "$SCRIPT" "$OUT"
   cmp "$OUT/install" "$BATS_TEST_DIRNAME/../install/install.sh"
 }
+
+@test "refuses an output directory that is the repository or one of its parents" {
+  # Run against a throwaway copy so a broken guard cannot touch the real repo.
+  copy="$BATS_TEST_TMPDIR/copy/repo"
+  mkdir -p "$copy"
+  cp -R "$BATS_TEST_DIRNAME/../pages" "$BATS_TEST_DIRNAME/../install" "$BATS_TEST_DIRNAME/../firstboot" "$BATS_TEST_DIRNAME/../keys" "$copy/"
+  run "$copy/pages/build-site.sh" "$copy";                 [ "$status" -eq 2 ]
+  run "$copy/pages/build-site.sh" "$copy/pages/..";        [ "$status" -eq 2 ]
+  run "$copy/pages/build-site.sh" "$BATS_TEST_TMPDIR/copy"; [ "$status" -eq 2 ]
+  cd "$copy" && run pages/build-site.sh .;                 [ "$status" -eq 2 ]
+  [ -f "$copy/install/install.sh" ]
+  run "$copy/pages/build-site.sh" "$BATS_TEST_TMPDIR/copy/out"; [ "$status" -eq 0 ]
+}

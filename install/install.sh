@@ -57,7 +57,8 @@ if [[ ! $hostname =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
   usage
 fi
 
-known_disks=$(diskinfo -H | awk '{ print $1; print $2 }')
+# diskinfo -H columns: TYPE DISK VID PID SIZE RMV SSD; the disk name is column 2.
+known_disks=$(diskinfo -H | awk -F'\t' '{ print $2 }')
 for d in "${disks[@]}"; do
   if ! grep -qx -- "$d" <<< "$known_disks"; then
     printf 'install: disk %s not listed by diskinfo\n' "$d" >&2

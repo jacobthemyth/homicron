@@ -55,7 +55,7 @@ check() {
 apply() {
   if ! dataset_exists; then
     log "creating $dataset"
-    zfs create -o mountpoint="$real_home" "$dataset"
+    zfs create -p -o mountpoint="$real_home" "$dataset"
   fi
 
   if ! user_exists; then
@@ -83,7 +83,15 @@ apply() {
 
   if ! path_has_ooce; then
     log "adding $ooce_path to PATH in $login_defaults"
-    awk -v extra="$ooce_path" '/^PATH=/ { $0 = $0 ":" extra } { print }' "$login_defaults" > "$login_defaults.homicron"
+    # Three shapes of file: an active PATH= line (append to it), only the
+    # stock commented #PATH= line (uncomment and append), or neither (add one).
+    if grep -q '^PATH=' "$login_defaults"; then
+      awk -v extra="$ooce_path" '/^PATH=/ { $0 = $0 ":" extra } { print }' "$login_defaults" > "$login_defaults.homicron"
+    elif grep -q '^#PATH=' "$login_defaults"; then
+      awk -v extra="$ooce_path" '/^#PATH=/ && !done { sub(/^#/, ""); $0 = $0 extra; done = 1 } { print }' "$login_defaults" > "$login_defaults.homicron"
+    else
+      { cat "$login_defaults"; printf 'PATH=/usr/bin:/usr/sbin:%s\n' "$ooce_path"; } > "$login_defaults.homicron"
+    fi
     mv "$login_defaults.homicron" "$login_defaults"
   fi
 }
