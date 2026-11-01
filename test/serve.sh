@@ -6,7 +6,8 @@
 #   test/serve.sh [PORT]    default 8000
 #
 # From a qemu guest on user-mode networking the host is 10.0.2.2, so:
-#   curl -fsSL http://10.0.2.2:8000/install | HOMICRON_BASE_URL=http://10.0.2.2:8000 bash -s -- vm c1t0d0
+#   echo "nameserver $(dhcpinfo -i vioif0 DNSserv)" > /etc/resolv.conf
+#   curl -fsSLo /tmp/i http://10.0.2.2:8000/install && HOMICRON_BASE_URL=http://10.0.2.2:8000 bash /tmp/i vm c1t0d0
 #
 set -o errexit -o pipefail -o nounset
 

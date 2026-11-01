@@ -17,7 +17,8 @@
 
 <h2>Install</h2>
 <p>Boot the stock Helios installer ISO. At its root prompt, find the NIC with <code>dladm show-phys</code> and the disk with <code>diskinfo</code>, then type:</p>
-<pre><code>ipadm create-addr -T dhcp rge0/v4 &amp;&amp; curl -fsSL https://homicron.smithjs.org/install | bash -s -- &lt;hostname&gt; &lt;disk&gt;</code></pre>
+<pre><code>ipadm create-addr -T dhcp rge0/v4 &amp;&amp; echo "nameserver $(dhcpinfo -i rge0 DNSserv)" &gt; /etc/resolv.conf &amp;&amp; curl -fsSLo /tmp/i https://homicron.smithjs.org/install &amp;&amp; bash /tmp/i &lt;hostname&gt; &lt;disk&gt;</code></pre>
+<p>The second command is needed because the installer ramdisk ships an empty <code>/etc/resolv.conf</code> and DHCP does not fill it, so the name would not resolve.</p>
 <p>When it prints <code>install complete</code>, remove the media and run <code>reboot</code>.</p>
 
 <h2>What happens</h2>

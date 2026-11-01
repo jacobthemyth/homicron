@@ -18,10 +18,14 @@ Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/
 3. Type one line:
 
    ```
-   ipadm create-addr -T dhcp rge0/v4 && curl -fsSL https://homicron.smithjs.org/install | bash -s -- <hostname> <disk>
+   ipadm create-addr -T dhcp rge0/v4 && echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>
    ```
 
    One disk makes a single-disk pool, two make a mirror, three make raidz1.
+   The `resolv.conf` step is required: the installer ramdisk ships an empty
+   `/etc/resolv.conf` and DHCP does not fill it, so without it `curl` cannot
+   resolve the name. Downloading to a file first means a failed download
+   stops the line instead of feeding an empty script to `bash`.
 4. When it prints `install complete; remove the media and run: reboot`,
    remove the media and run `reboot`.
 5. On first boot the machine prints its address on the console. It has sshd
@@ -72,7 +76,7 @@ test/qemu.sh install
 At the installer prompt (the NIC is `vioif0` under qemu):
 
 ```
-ipadm create-addr -T dhcp vioif0/v4 && curl -fsSL http://10.0.2.2:8000/install | HOMICRON_BASE_URL=http://10.0.2.2:8000 bash -s -- vm c1t0d0
+ipadm create-addr -T dhcp vioif0/v4 && echo "nameserver $(dhcpinfo -i vioif0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i http://10.0.2.2:8000/install && HOMICRON_BASE_URL=http://10.0.2.2:8000 bash /tmp/i vm c1t0d0
 ```
 
 Then `reboot`, quit qemu with `Ctrl-a x` when the loader appears, and boot
@@ -92,7 +96,7 @@ column is filled in after the first physical install.
 | Item | VM | IMB-A1002 |
 |---|---|---|
 | `ipadm create-addr -T dhcp` works in the installer ramdisk | yes | |
-| the ramdisk's `curl` trusts the GitHub Pages certificate | | |
+| the ramdisk's `curl` trusts the GitHub Pages certificate | yes (`ssl_verify_result` 0, HTTP 200) | |
 | `SVCCFG_REPOSITORY=/a/etc/svc/repository.db svccfg import` enables the first-boot service | yes, `general/enabled true` before reboot | |
 | the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
 | `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
@@ -101,7 +105,8 @@ Findings from the rehearsal that changed the code:
 
 - `dhcpagent` records the DNS servers from the lease but never writes
   `/etc/resolv.conf` (that is nwam's job). First boot now writes it from
-  `dhcpinfo` when the file is absent.
+  `dhcpinfo` when the file is absent, and the typed install line writes it
+  in the ramdisk, where the file exists but is empty.
 - The SMF method PATH is `/usr/sbin:/usr/bin`; `dhcpinfo` lives in `/sbin`.
 - `profiles <user>` indents each profile name, so an exact-line match fails.
 - A fresh install's `pkg update` exits 1 with "pkg(7) appears to be out of

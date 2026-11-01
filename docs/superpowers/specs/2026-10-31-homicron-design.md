@@ -132,7 +132,7 @@ The person attaches the stock `helios-install-vga.iso` (or `ttya` for a
 serial console) as virtual media, boots it, and types:
 
 ```
-ipadm create-addr -T dhcp rge0/v4 && curl -fsSL https://homicron.smithjs.org/install | bash -s -- <hostname> <disk>...
+ipadm create-addr -T dhcp rge0/v4 && echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>...
 ```
 
 The NIC name comes from `dladm show-phys` on the installer console. The disk

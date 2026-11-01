@@ -3,7 +3,8 @@
 # homicron stage 1. Runs in the Helios installer ramdisk, as root.
 #
 #   ipadm create-addr -T dhcp rge0/v4 && \
-#     curl -fsSL https://homicron.smithjs.org/install | bash -s -- <hostname> <disk>...
+#     echo "nameserver $(dhcpinfo -i rge0 DNSserv)" > /etc/resolv.conf && \
+#     curl -fsSLo /tmp/i https://homicron.smithjs.org/install && bash /tmp/i <hostname> <disk>...
 #
 # Runs install-helios, then seeds the new root (still mounted at /a) with the
 # SSH keys, the first-boot service, and /etc/homicron.conf. Does not reboot.
