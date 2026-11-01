@@ -44,6 +44,17 @@ setup() {
   refute_called '^svcadm'
 }
 
+file_mode() {
+  if stat --version >/dev/null 2>&1; then stat -c %a "$1"; else stat -f %Lp "$1"; fi
+}
+
+@test "resolv.conf is world-readable whatever umask dhcpagent runs the hook with" {
+  umask 077
+  run "$HOOK" rge0 BOUND
+  [ "$status" -eq 0 ]
+  [ "$(file_mode "$HOMICRON_RESOLV_CONF")" = 644 ]
+}
+
 @test "no domain in the lease gives nameserver lines only" {
   printf 'case "$*" in *DNSserv) echo 10.0.2.3 ;; *) exit 1 ;; esac; exit 0\n' > "$FAKE_BIN/dhcpinfo.script"
   run "$HOOK" rge0 BOUND

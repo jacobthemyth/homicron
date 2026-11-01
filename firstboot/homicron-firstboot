@@ -30,19 +30,27 @@ say() {
   printf 'homicron-firstboot: %s\n' "$*" >> "$msglog" 2>/dev/null
 }
 
+has_v4_addrobj() {
+  ipadm show-addr -p -o addrobj 2>/dev/null | grep -qx "$1/v4"
+}
+
 say "host $HOSTNAME: configuring network"
 
 links=$(dladm show-phys -p -o link 2>/dev/null)
 for link in $links; do
-  if ipadm show-addr -p -o addrobj 2>/dev/null | grep -qx "$link/v4"; then
+  if has_v4_addrobj "$link"; then
     say "$link already has a v4 address object"
     continue
   fi
   # -w 0: do not wait here at all; dhcpagent keeps trying in the background
   # and the poll below picks the address up. A port with no cable costs
-  # nothing.
-  if ipadm create-addr -T dhcp -w 0 "$link/v4"; then
+  # nothing. ipadm can return nonzero on an immediate timeout and still keep
+  # the address object; only a missing object is a failure, and then the
+  # request is retried with a short wait in case 0 was refused.
+  if ipadm create-addr -T dhcp -w 0 "$link/v4" || has_v4_addrobj "$link"; then
     say "requested DHCP on $link"
+  elif ipadm create-addr -T dhcp -w 1 "$link/v4" || has_v4_addrobj "$link"; then
+    say "requested DHCP on $link (after a retry with -w 1)"
   else
     say "ipadm create-addr failed on $link"
   fi

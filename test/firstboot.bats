@@ -48,6 +48,23 @@ setup() {
   assert_called '^svcadm disable site/homicron-firstboot$'
 }
 
+@test "retries create-addr with -w 1 when -w 0 fails and left no address object" {
+  printf '[[ $1 == create-addr && $* == *"-w 0"* ]] && exit 1; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_called '^ipadm create-addr -T dhcp -w 1 rge0/v4$'
+  assert_called '^ipadm create-addr -T dhcp -w 1 rge1/v4$'
+  grep -q 'requested DHCP on rge0' "$HOMICRON_MSGLOG"
+}
+
+@test "a nonzero -w 0 that still created the address object is not an error" {
+  printf '[[ $1 == create-addr ]] && exit 1; [[ $1 == show-addr && $* == *addrobj* ]] && { grep -q "^ipadm create-addr" "$FAKE_LOG" && printf "rge0/v4\\nrge1/v4\\n"; }; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  refute_called '^ipadm create-addr -T dhcp -w 1'
+  ! grep -q 'failed' "$HOMICRON_MSGLOG"
+}
+
 @test "the ? placeholder does not count as an address" {
   printf '[[ $1 == show-addr ]] && [[ $* == *-o\\ addr* ]] && echo "?"; exit 0\n' > "$FAKE_BIN/ipadm.script"
   run "$SCRIPT"

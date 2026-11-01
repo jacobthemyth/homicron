@@ -16,8 +16,10 @@
 #
 set -o nounset
 
-# dhcpagent's environment is minimal; dhcpinfo lives in /sbin.
+# dhcpagent's environment is minimal; dhcpinfo lives in /sbin, and the umask
+# is not documented. resolv.conf must stay world-readable.
 PATH="$PATH:/sbin:/usr/sbin"
+umask 022
 
 resolv_conf=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
 msglog=${HOMICRON_MSGLOG:-/dev/msglog}
