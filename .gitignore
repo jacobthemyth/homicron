@@ -3,3 +3,4 @@ test/vm/
 *.iso
 *.qcow2
 .superpowers/
+.worktrees/
