@@ -44,6 +44,7 @@ setup() {
 @test "exit 10 reboots, waits, reruns the step, then continues" {
   cat > "$FAKE_BIN/ssh.script" <<'EOS'
 case "$*" in
+  *kstat*) n=$(grep -c 'reboot$' "$FAKE_LOG"); printf 'unix:0:system_misc:boot_time\t%s\n' "$((1000 + n))"; exit 0 ;;
   *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
   *) exit 0 ;;
 esac
@@ -54,6 +55,35 @@ EOS
   assert_called '^ssh .*-o ServerAliveInterval=[0-9]+ .*root@box.local reboot$'
   [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
   assert_called '20-b.sh$'
+}
+
+@test "an unchanged boot time means the reboot was lost; it is sent again" {
+  cat > "$FAKE_BIN/ssh.script" <<'EOS'
+case "$*" in
+  *kstat*) n=$(grep -c 'kstat' "$FAKE_LOG"); if (( n <= 2 )); then t=1000; else t=1001; fi; printf 'unix:0:system_misc:boot_time\t%s\n' "$t"; exit 0 ;;
+  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
+  *) exit 0 ;;
+esac
+EOS
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c 'reboot$')" -eq 2 ]
+  [[ "$output" == *"has not rebooted yet"* ]]
+  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
+}
+
+@test "a failing kstat still reboots, waits for ssh, and reruns the step" {
+  cat > "$FAKE_BIN/ssh.script" <<'EOS'
+case "$*" in
+  *kstat*) exit 1 ;;
+  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
+  *) exit 0 ;;
+esac
+EOS
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called 'root@box.local reboot$'
+  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
 }
 
 @test "exit 255 reports unreachable and exits 1" {
@@ -80,8 +110,8 @@ EOS
 @test "every ssh and the rsync transport carry keepalives" {
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
-  assert_called '^ssh -p 2222 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@box.local /opt/homicron/run-step.sh 10-a.sh$'
-  assert_called '^rsync .* -e ssh -p 2222 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 .*host.env$'
+  assert_called '^ssh -p 2222 -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@box.local /opt/homicron/run-step.sh 10-a.sh$'
+  assert_called '^rsync .* -e ssh -p 2222 -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 .*host.env$'
 }
 
 @test "an rsync failure that is not 255 is reported as rsync, not as unreachable" {

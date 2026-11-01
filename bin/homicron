@@ -15,7 +15,8 @@ remote_dir=/opt/homicron
 remote_log_dir=/var/log/homicron
 # Every ssh and the rsync transport use these. Keepalives: a NAT or port
 # forward (qemu user networking, some firewalls) never closes the connection
-# when the box goes down, and a plain ssh would hang forever.
+# when the box goes down, and a plain ssh would hang forever. The connect
+# timeout keeps the reboot poll moving while the box is down.
 ssh_opts=()
 
 poll=${HOMICRON_POLL_SECONDS:-5}
@@ -73,7 +74,7 @@ load_host() {
   export VOXEL_SLEDS=${VOXEL_SLEDS:-4}
   export VOXEL_SLED_MEMORY_GB=${VOXEL_SLED_MEMORY_GB:-8}
 
-  ssh_opts=(-p "$HOMICRON_PORT" -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
+  ssh_opts=(-p "$HOMICRON_PORT" -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
 }
 
 remote() {
@@ -103,14 +104,35 @@ write_resolved_env() {
   done
 }
 
-wait_for_ssh() {
-  local deadline=$(( SECONDS + reboot_timeout ))
-  sleep "$(( poll * 4 ))"
-  until ssh "${ssh_opts[@]}" -o ConnectTimeout=5 "root@$HOMICRON_ADDR" true >/dev/null 2>&1; do
+# The kernel boot time, so a reboot can be told from an ssh that never
+# connected: on illumos a successful `reboot` kills sshd before the system
+# goes down, and that ends the session with 255 just like a failed connect.
+boot_time() {
+  remote 'kstat -p unix:0:system_misc:boot_time' 2>/dev/null | awk '{ print $2 }'
+}
+
+# Reboot the box and wait until it is back with a new boot time. When ssh
+# works but the boot time is unchanged, the reboot never reached the box, so
+# it is sent again. A box without kstat falls back to "ssh works again".
+reboot_box() {
+  local before now deadline=$(( SECONDS + reboot_timeout ))
+  before=$(boot_time) || before=
+  remote reboot || true
+  while true; do
     if (( SECONDS >= deadline )); then
       die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
     fi
     sleep "$poll"
+    if [[ -z $before ]]; then
+      remote true >/dev/null 2>&1 && return 0
+      continue
+    fi
+    now=$(boot_time) || continue
+    if [[ -n $now && $now != "$before" ]]; then
+      return 0
+    fi
+    printf 'box has not rebooted yet; sending reboot again\n'
+    remote reboot || true
   done
 }
 
@@ -150,8 +172,7 @@ apply() {
     run_step "$step" || status=$?
     if (( status == 10 )); then
       printf '%s requested a reboot\n' "$step"
-      remote reboot || true
-      wait_for_ssh
+      reboot_box
       status=0
       run_step "$step" || status=$?
     fi
