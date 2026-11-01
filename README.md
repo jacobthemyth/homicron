@@ -25,11 +25,14 @@ Design: [docs/superpowers/specs/2026-10-31-homicron-design.md](docs/superpowers/
    The `resolv.conf` step is required: the installer ramdisk ships an empty
    `/etc/resolv.conf` and DHCP does not fill it, so without it `curl` cannot
    resolve the name. Downloading to a file first means a failed download
-   stops the line instead of feeding an empty script to `bash`.
+   stops the line instead of feeding an empty script to `bash`. If the
+   install line stops with a checksum mismatch minutes after a push, the
+   site cache is still serving an old file. Wait ten minutes and retry.
 4. When it prints `install complete; remove the media and run: reboot`,
    remove the media and run `reboot`.
 5. On first boot the machine prints its address on the console. It has sshd
-   and mDNS enabled and root accepts the keys in `keys/authorized_keys`.
+   and mDNS enabled and root accepts the keys in `keys/authorized_keys`. A
+   dhcpagent hook writes `/etc/resolv.conf` from every lease.
 6. Create `hosts/<hostname>.env` (see [hosts/README.md](hosts/README.md)) and run:
 
    ```
@@ -69,8 +72,8 @@ DEGRADED until the disk is back.
 
 | Stage | Where | What |
 |---|---|---|
-| `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with root's authorized_keys, the first-boot service, and `/etc/homicron.conf` |
-| `firstboot/` | first boot, once | DHCP on every physical NIC, enable sshd and mDNS, print the address, disable itself |
+| `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with root's authorized_keys, the first-boot service, the DNS hook, the ramdisk's resolv.conf, and `/etc/homicron.conf` |
+| `firstboot/` | first boot, once | DHCP on every physical NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the address, disable itself |
 | `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, `voxel.toml` |
 
 Every host step checks its own end state first and does nothing when it
@@ -90,6 +93,8 @@ test/serve.sh 8000
 # terminal B: download the ISO, create a 100 GiB disk, boot the installer
 test/qemu.sh install
 ```
+
+Set `HOMICRON_VM_NIC2=yes` to add an uncabled second NIC like the IMB-A1002.
 
 At the installer prompt (the NIC is `vioif0` under qemu):
 
@@ -119,13 +124,15 @@ column is filled in after the first physical install.
 | the IMB-A1002 NIC appears as `rge0` | n/a (`vioif0`) | |
 | `network/ssh` is disabled on a fresh install, so first boot must enable it | no: it was already online; the enable is a no-op | |
 | the box answers as `<hostname>.local` through `network/dns/multicast`, so `HOMICRON_ADDR` can stay empty | not testable (qemu user networking carries no multicast) | |
+| `ipadm create-addr -T dhcp -w 0` is accepted and dhcpagent keeps trying in the background | | |
+| dhcpagent runs `/etc/dhcp/eventhook` on BOUND, so `/etc/resolv.conf` is written from the lease | | |
 
 Findings from the rehearsal that changed the code:
 
 - `dhcpagent` records the DNS servers from the lease but never writes
-  `/etc/resolv.conf` (that is nwam's job). First boot now writes it from
-  `dhcpinfo` when the file is absent, and the typed install line writes it
-  in the ramdisk, where the file exists but is empty.
+  `/etc/resolv.conf` (that is nwam's job). A dhcpagent event hook, seeded
+  by the installer, writes it on every lease. The typed install line writes
+  it in the ramdisk, where the file exists but is empty.
 - The SMF method PATH is `/usr/sbin:/usr/bin`; `dhcpinfo` lives in `/sbin`.
 - `profiles <user>` indents each profile name, so an exact-line match fails.
 - A fresh install's `pkg update` exits 1 with "pkg(7) appears to be out of

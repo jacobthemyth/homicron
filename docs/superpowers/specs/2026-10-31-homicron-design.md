@@ -57,6 +57,9 @@ on 2026-10-31.
 
 ## Architecture
 
+Changes after the review of 2026-11-01 are in
+[2026-11-01-review-fixes-design.md](2026-11-01-review-fixes-design.md).
+
 Three stages, split by where and as whom they run.
 
 | Stage | Runs where | Runs as | Trigger |
