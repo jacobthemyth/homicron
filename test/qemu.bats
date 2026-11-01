@@ -20,3 +20,11 @@ SCRIPT="$BATS_TEST_DIRNAME/../test/qemu.sh"
   run "$SCRIPT" --dry-run fly
   [ "$status" -eq 2 ]
 }
+
+@test "HOMICRON_VM_DISK2 adds a second virtio disk" {
+  HOMICRON_VM_DIR=/tmp/x HOMICRON_VM_DISK2=20G run "$SCRIPT" --dry-run boot
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"file=/tmp/x/disk2.qcow2,if=virtio,format=qcow2"* ]]
+  HOMICRON_VM_DIR=/tmp/x run "$SCRIPT" --dry-run boot
+  [[ "$output" != *"disk2"* ]]
+}

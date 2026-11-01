@@ -12,6 +12,7 @@
 #   HOMICRON_VM_MEM    (16G)
 #   HOMICRON_VM_CPUS   (8)
 #   HOMICRON_VM_DISK   (100G)
+#   HOMICRON_VM_DISK2  (unset)        size of an optional second disk, for mirror rehearsals
 #   HOMICRON_SSH_PORT  (2222)         host port forwarded to guest port 22
 #   OVMF_CODE          (/usr/share/edk2/x64/OVMF_CODE.4m.fd)
 #   OVMF_VARS          (/usr/share/edk2/x64/OVMF_VARS.4m.fd)
@@ -27,12 +28,14 @@ iso_url=${HOMICRON_ISO_URL:-https://pkg.oxide.computer/install/latest/helios-ins
 mem=${HOMICRON_VM_MEM:-16G}
 cpus=${HOMICRON_VM_CPUS:-8}
 disk_size=${HOMICRON_VM_DISK:-100G}
+disk2_size=${HOMICRON_VM_DISK2:-}
 ssh_port=${HOMICRON_SSH_PORT:-2222}
 ovmf_code=${OVMF_CODE:-/usr/share/edk2/x64/OVMF_CODE.4m.fd}
 ovmf_vars=${OVMF_VARS:-/usr/share/edk2/x64/OVMF_VARS.4m.fd}
 
 iso="$vm_dir/$(basename "$iso_url")"
 disk="$vm_dir/disk.qcow2"
+disk2="$vm_dir/disk2.qcow2"
 vars="$vm_dir/vars.fd"
 
 usage() {
@@ -57,6 +60,11 @@ cmd=(
   -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code"
   -drive "if=pflash,format=raw,file=$vars"
   -drive "file=$disk,if=virtio,format=qcow2"
+)
+if [[ -n $disk2_size ]]; then
+  cmd+=(-drive "file=$disk2,if=virtio,format=qcow2")
+fi
+cmd+=(
   -netdev "user,id=n0,hostfwd=tcp::$ssh_port-:22"
   -device "virtio-net-pci,netdev=n0"
   -nographic -serial mon:stdio
@@ -77,6 +85,9 @@ if [[ $mode == install && ! -f $iso ]]; then
 fi
 if [[ ! -f $disk ]]; then
   qemu-img create -f qcow2 "$disk" "$disk_size"
+fi
+if [[ -n $disk2_size && ! -f $disk2 ]]; then
+  qemu-img create -f qcow2 "$disk2" "$disk2_size"
 fi
 if [[ ! -f $vars ]]; then
   cp "$ovmf_vars" "$vars"
