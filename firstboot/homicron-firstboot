@@ -2,7 +2,9 @@
 #
 # homicron first-boot service. Runs once on the first boot after
 # install-helios: brings up DHCP on every physical link, enables sshd and
-# mDNS, reports the addresses on the console, then disables itself.
+# mDNS, reports the addresses on the console, then disables itself. DNS
+# comes from the dhcpagent event hook (firstboot/dhcp-eventhook), which the
+# installer seeds to /etc/dhcp/eventhook.
 #
 # This method must always exit 0. A failing method would put the service in
 # maintenance and hide the console login.
@@ -15,7 +17,7 @@ PATH="$PATH:/sbin"
 conf=${HOMICRON_CONF:-/etc/homicron.conf}
 msglog=${HOMICRON_MSGLOG:-/dev/msglog}
 dhcp_wait=${HOMICRON_DHCP_WAIT:-60}
-resolv_conf=${HOMICRON_RESOLV_CONF:-/etc/resolv.conf}
+eventhook=${HOMICRON_EVENTHOOK:-/etc/dhcp/eventhook}
 
 HOSTNAME=unknown
 if [[ -r $conf ]]; then
@@ -36,9 +38,10 @@ for link in $links; do
     say "$link already has a v4 address object"
     continue
   fi
-  # -w 10: do not block two minutes on a port with no cable; dhcpagent keeps
-  # trying in the background and the poll below picks the address up.
-  if ipadm create-addr -T dhcp -w 10 "$link/v4"; then
+  # -w 0: do not wait here at all; dhcpagent keeps trying in the background
+  # and the poll below picks the address up. A port with no cable costs
+  # nothing.
+  if ipadm create-addr -T dhcp -w 0 "$link/v4"; then
     say "requested DHCP on $link"
   else
     say "ipadm create-addr failed on $link"
@@ -48,52 +51,31 @@ done
 svcadm enable network/ssh || say "could not enable network/ssh"
 svcadm enable network/dns/multicast || say "could not enable network/dns/multicast"
 
+# Wait for a real IPv4 address. ipadm prints `?` for a DHCP address object
+# that has no lease yet, so match a dotted address and skip loopback.
 addrs=
 for (( i = 0; i < dhcp_wait; i++ )); do
-  addrs=$(ipadm show-addr -p -o addr 2>/dev/null | grep -v '^127\.' | grep -v ':' || true)
+  addrs=$(ipadm show-addr -p -o addr 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | grep -v '^127\.')
   if [[ -n $addrs ]]; then
     break
   fi
   sleep 1
 done
 
-#
-# dhcpagent records the DNS servers from the lease but does not write
-# /etc/resolv.conf (that is nwam's job, and Helios does not run nwam).
-#
-write_resolv_conf() {
-  local link servers domain found=no
-  for link in $links; do
-    servers=$(dhcpinfo -i "$link" DNSserv 2>/dev/null || true)
-    [[ -n $servers ]] || continue
-    if [[ $found == no ]]; then
-      : > "$resolv_conf"
-      found=yes
-      domain=$(dhcpinfo -i "$link" DNSdmain 2>/dev/null || true)
-      [[ -n $domain ]] && printf 'domain %s\n' "$domain" >> "$resolv_conf"
-    fi
-    for s in $servers; do
-      printf 'nameserver %s\n' "$s" >> "$resolv_conf"
-    done
-  done
-  if [[ $found == yes ]]; then
-    say "wrote $resolv_conf from the DHCP lease"
-    svcadm refresh network/dns/client || say "could not refresh network/dns/client"
-  else
-    say "no DNS servers in the DHCP lease; $resolv_conf not written"
-  fi
-}
+# Run the hook now for every link that already has a lease, so the common
+# case does not wait for dhcpagent's callback. The hook ignores a link
+# without DNS servers, and dhcpagent runs it again when a lease lands later.
+for link in $links; do
+  "$eventhook" "$link" BOUND || say "dhcp hook failed on $link"
+done
 
 if [[ -n $addrs ]]; then
-  if [[ ! -s $resolv_conf ]]; then
-    write_resolv_conf
-  fi
   say "host $HOSTNAME is reachable at:"
   for a in $addrs; do
     say "  $a"
   done
 else
-  say "no DHCP address after ${dhcp_wait}s; sshd is enabled, fix the network from the console"
+  say "no DHCP address after ${dhcp_wait}s; sshd is enabled, and the lease brings the address and DNS when it arrives"
 fi
 
 svcadm disable site/homicron-firstboot || say "could not disable site/homicron-firstboot"
