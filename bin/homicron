@@ -32,11 +32,12 @@ die() {
   exit "${2:-1}"
 }
 
-# A value the box can source as shell without surprise: no whitespace,
-# quotes, comment sign, backslash, backtick, or dollar. [:space:] covers the
-# carriage return of a CRLF file.
+# A value the box can source as shell without surprise: letters, digits,
+# and the punctuation that logins, sizes, dataset names, git refs, hosts
+# and addresses need. Everything else (whitespace, quotes, `;`, `|`, `$`,
+# `~`, ...) is refused, so the line is read literally on both sides.
 valid_value() {
-  local re='^[^[:space:]'\''"#\\`$]*$'
+  local re='^[A-Za-z0-9._/:@%+,-]*$'
   [[ $1 =~ $re ]]
 }
 
@@ -193,7 +194,9 @@ case "$1" in
     ;;
   ssh)
     load_host "$2"
-    exec ssh "${ssh_opts[@]}" "$HOMICRON_USER@$HOMICRON_ADDR"
+    # No keepalives here: an interactive session may be running a 45-minute
+    # image build, and a short network drop must not end it.
+    exec ssh -p "$HOMICRON_PORT" "$HOMICRON_USER@$HOMICRON_ADDR"
     ;;
   *)
     usage

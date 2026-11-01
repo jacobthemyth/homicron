@@ -103,9 +103,10 @@ EOS
   refute_called '20-b.sh$'
 }
 
-@test "ssh subcommand uses the user and port" {
+@test "ssh subcommand uses the user and port, without keepalives" {
   run "$REPO/bin/homicron" ssh box
   assert_called '^ssh -p 2222 .*jacob@box.local$'
+  refute_called 'ServerAlive.*jacob@box.local$'
 }
 
 @test "every ssh and the rsync transport carry keepalives" {
@@ -139,7 +140,7 @@ EOS
 }
 
 @test "malformed hosts lines exit 2 with the line number before rsync" {
-  for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r'; do
+  for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r' 'HOMICRON_ADDR=box;reboot' 'VOXEL_REF=main|true' 'FALCON_DATASET=~/falcon'; do
     printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"
     run "$REPO/bin/homicron" apply bad
     [ "$status" -eq 2 ]
