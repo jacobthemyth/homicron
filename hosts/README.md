@@ -3,8 +3,9 @@
 One file per machine, named `hosts/<name>.env`. Each line is `KEY=VALUE`
 with no quotes and no shell syntax: the runner reads the value literally.
 The key is uppercase letters, digits, and underscores. The value holds only
-letters, digits, and `. _ / : @ % + , -`. A line that breaks the rule stops
-the runner with exit 2 and the line number.
+letters, digits, and `. _ / : @ % + , -`. Only the variables in the table
+below are allowed. A line that breaks a rule stops the runner with exit 2
+and the line number.
 A variable that is already set in the environment wins over the file, so
 private addresses never need to be committed. Values set in the environment
 follow the same rule.

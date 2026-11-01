@@ -73,6 +73,14 @@ file_mode() {
   assert_called '^install-helios'
 }
 
+@test "an indented key line counts as a key" {
+  printf '  ssh-ed25519 AAAA indented\n' > "$BATS_TEST_TMPDIR/site/keys/authorized_keys"
+  fake_site_resum "$BATS_TEST_TMPDIR/site"
+  run "$SCRIPT" host01 c1t0d0
+  [ "$status" -eq 0 ]
+  assert_called '^install-helios'
+}
+
 @test "a comment-only keys file still counts as no key" {
   printf '# keys go here\n' > "$BATS_TEST_TMPDIR/site/keys/authorized_keys"
   fake_site_resum "$BATS_TEST_TMPDIR/site"

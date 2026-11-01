@@ -42,9 +42,9 @@ has_icmp_priv() {
   userattr defaultpriv "$user" 2>/dev/null | grep -q 'net_icmpaccess'
 }
 
-# A line that is not blank and not a comment is a key.
+# A line that is not blank and not a comment is a key, indented or not.
 keys_present() {
-  grep -Eq '^[^#[:space:]]' "$keys_src"
+  grep -Eq '^[[:space:]]*[^#[:space:]]' "$keys_src"
 }
 
 keys_match() {

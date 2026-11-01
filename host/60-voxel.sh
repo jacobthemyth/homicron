@@ -55,7 +55,7 @@ apply() {
     as_user "mkdir -p $(dirname "$src") && git clone $repo $src"
   fi
   # check fetched already, or the clone is fresh; no second fetch.
-  commit=$(resolve_ref)
+  commit=$(resolve_ref) || { log "VOXEL_REF $ref names no commit on origin or locally"; exit 1; }
   log "checking out $commit ($ref)"
   as_user "cd $src && git checkout --detach $commit"
   log "cargo build --release (this takes a while)"

@@ -38,15 +38,21 @@ domain=$(dhcpinfo -i "$iface" DNSdmain 2>/dev/null) || domain=
 
 # Write the whole file, then rename, so a reader never sees it half written.
 tmp="$resolv_conf.tmp.$$"
-{
-  [[ -n $domain ]] && printf 'domain %s\n' "$domain"
-  for s in $servers; do
-    printf 'nameserver %s\n' "$s"
-  done
-} > "$tmp"
-mv "$tmp" "$resolv_conf"
+write_file() {
+  {
+    [[ -n $domain ]] && printf 'domain %s\n' "$domain"
+    for s in $servers; do
+      printf 'nameserver %s\n' "$s"
+    done
+  } > "$tmp" 2>/dev/null && mv "$tmp" "$resolv_conf" 2>/dev/null
+}
 
-svcadm refresh network/dns/client 2>/dev/null || true
-printf 'homicron-dhcp-eventhook: wrote %s from %s\n' "$resolv_conf" "$iface" >> "$msglog" 2>/dev/null
+if write_file; then
+  svcadm refresh network/dns/client 2>/dev/null || true
+  printf 'homicron-dhcp-eventhook: wrote %s from %s\n' "$resolv_conf" "$iface" >> "$msglog" 2>/dev/null
+else
+  rm -f "$tmp" 2>/dev/null
+  printf 'homicron-dhcp-eventhook: could not write %s\n' "$resolv_conf" >> "$msglog" 2>/dev/null
+fi
 
 exit 0

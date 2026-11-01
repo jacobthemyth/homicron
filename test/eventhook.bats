@@ -55,6 +55,15 @@ file_mode() {
   [ "$(file_mode "$HOMICRON_RESOLV_CONF")" = 644 ]
 }
 
+@test "a failed write is logged as a failure, with no refresh and no temp file" {
+  export HOMICRON_RESOLV_CONF="$BATS_TEST_TMPDIR/no-such-dir/resolv.conf"
+  run "$HOOK" rge0 BOUND
+  [ "$status" -eq 0 ]
+  grep -q 'could not write' "$HOMICRON_MSGLOG"
+  ! grep -q 'wrote' "$HOMICRON_MSGLOG"
+  refute_called '^svcadm'
+}
+
 @test "no domain in the lease gives nameserver lines only" {
   printf 'case "$*" in *DNSserv) echo 10.0.2.3 ;; *) exit 1 ;; esac; exit 0\n' > "$FAKE_BIN/dhcpinfo.script"
   run "$HOOK" rge0 BOUND

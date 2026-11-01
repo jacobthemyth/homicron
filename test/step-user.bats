@@ -65,6 +65,14 @@ setup() {
   [ ! -e "$HOMICRON_HOME/jacob/.ssh/authorized_keys" ]
 }
 
+@test "an indented key line counts as a key, as sshd reads it" {
+  make_fake getent 2
+  printf '  ssh-ed25519 AAAA indented\n' > "$HOMICRON_DIR/authorized_keys"
+  run "$STEP"
+  [[ "$output" != *"no key"* ]]
+  assert_called '^useradd'
+}
+
 @test "converges root's authorized_keys as well as the user's" {
   make_fake getent 2
   run "$STEP"

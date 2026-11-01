@@ -94,8 +94,8 @@ for f in "${files[@]}"; do
 done
 
 # Any line that is not blank and not a comment is a key: sshd accepts
-# sk- key types and option-prefixed lines as well as ssh- and ecdsa-.
-if ! grep -Eq '^[^#[:space:]]' "$tmp/keys/authorized_keys"; then
+# sk- key types, option-prefixed lines, and leading whitespace.
+if ! grep -Eq '^[[:space:]]*[^#[:space:]]' "$tmp/keys/authorized_keys"; then
   fail "authorized_keys contains no key; refusing to install a machine nobody can log in to"
 fi
 

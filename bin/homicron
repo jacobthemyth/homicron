@@ -21,6 +21,13 @@ ssh_opts=()
 
 poll=${HOMICRON_POLL_SECONDS:-5}
 reboot_timeout=${HOMICRON_REBOOT_TIMEOUT:-600}
+# How long a sent reboot gets before an unchanged box means it was lost.
+reboot_grace=${HOMICRON_REBOOT_GRACE:-60}
+
+# The variables a hosts file may set and host.env always carries. load_host
+# refuses any other key, so a typo cannot fall back to a default in silence.
+host_vars=(HOMICRON_USER HOMICRON_UID HOMICRON_ADDR HOMICRON_PORT SWAP_SIZE DUMP_SIZE
+           FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB)
 
 usage() {
   printf 'usage: homicron apply <name> | homicron ssh <name>\n' >&2
@@ -41,6 +48,14 @@ valid_value() {
   [[ $1 =~ $re ]]
 }
 
+known_var() {
+  local v
+  for v in "${host_vars[@]}"; do
+    [[ $v == "$1" ]] && return 0
+  done
+  return 1
+}
+
 #
 # Load hosts/<name>.env. Environment values take precedence over the file.
 # Each line is KEY=VALUE, read literally; anything else is a configuration
@@ -58,6 +73,7 @@ load_host() {
     fi
     key=${line%%=*}
     value=${line#*=}
+    known_var "$key" || die "hosts/$name.env line $n: unknown variable $key (see hosts/README.md)" 2
     if [[ -z ${!key+set} ]]; then
       export "$key=$value"
     fi
@@ -98,8 +114,7 @@ sync_to_box() {
 write_resolved_env() {
   local out="$1" var
   : > "$out"
-  for var in HOMICRON_USER HOMICRON_UID HOMICRON_ADDR HOMICRON_PORT SWAP_SIZE DUMP_SIZE \
-             FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB; do
+  for var in "${host_vars[@]}"; do
     valid_value "${!var}" || die "$var has characters the runner cannot ship" 2
     printf '%s=%s\n' "$var" "${!var}" >> "$out"
   done
@@ -113,27 +128,37 @@ boot_time() {
 }
 
 # Reboot the box and wait until it is back with a new boot time. When ssh
-# works but the boot time is unchanged, the reboot never reached the box, so
-# it is sent again. A box without kstat falls back to "ssh works again".
+# works but the boot time is unchanged after the grace period, the reboot
+# never reached the box, so it is sent again. A box without kstat falls back
+# to "ssh dropped, then works again".
 reboot_box() {
-  local before now deadline=$(( SECONDS + reboot_timeout ))
+  local before now sent went_down=no deadline=$(( SECONDS + reboot_timeout ))
   before=$(boot_time) || before=
   remote reboot || true
+  sent=$SECONDS
   while true; do
     if (( SECONDS >= deadline )); then
       die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
     fi
     sleep "$poll"
     if [[ -z $before ]]; then
-      remote true >/dev/null 2>&1 && return 0
-      continue
+      if ! remote true >/dev/null 2>&1; then
+        went_down=yes
+        continue
+      fi
+      [[ $went_down == yes ]] && return 0
+    else
+      now=$(boot_time) || continue
+      if [[ -n $now && $now != "$before" ]]; then
+        return 0
+      fi
     fi
-    now=$(boot_time) || continue
-    if [[ -n $now && $now != "$before" ]]; then
-      return 0
-    fi
+    # The box answers and has not rebooted. Give the reboot its grace period
+    # before deciding it was lost.
+    (( SECONDS - sent < reboot_grace )) && continue
     printf 'box has not rebooted yet; sending reboot again\n'
     remote reboot || true
+    sent=$SECONDS
   done
 }
 

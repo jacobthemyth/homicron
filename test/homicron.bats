@@ -13,7 +13,7 @@ setup() {
   printf '#!/bin/bash\n' > "$REPO/host/20-b.sh"
   make_fake rsync
   make_fake ssh
-  export HOMICRON_POLL_SECONDS=0 HOMICRON_REBOOT_TIMEOUT=1
+  export HOMICRON_POLL_SECONDS=0 HOMICRON_REBOOT_TIMEOUT=1 HOMICRON_REBOOT_GRACE=0
   unset HOMICRON_ADDR
 }
 
@@ -73,10 +73,25 @@ EOS
   [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
 }
 
-@test "a failing kstat still reboots, waits for ssh, and reruns the step" {
+@test "within the grace period an unchanged boot time does not resend reboot" {
+  cat > "$FAKE_BIN/ssh.script" <<'EOS'
+case "$*" in
+  *kstat*) printf 'unix:0:system_misc:boot_time\t1000\n'; exit 0 ;;
+  *10-a.sh) exit 10 ;;
+  *) exit 0 ;;
+esac
+EOS
+  HOMICRON_REBOOT_GRACE=60 run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot reach box.local after reboot"* ]]
+  [ "$(fake_calls | grep -c 'reboot$')" -eq 1 ]
+}
+
+@test "a failing kstat still reboots, waits for ssh to drop and return, and reruns the step" {
   cat > "$FAKE_BIN/ssh.script" <<'EOS'
 case "$*" in
   *kstat*) exit 1 ;;
+  *root@box.local\ true) n=$(grep -c 'true$' "$FAKE_LOG"); if (( n <= 2 )); then exit 255; else exit 0; fi ;;
   *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
   *) exit 0 ;;
 esac
@@ -85,6 +100,29 @@ EOS
   [ "$status" -eq 0 ]
   assert_called 'root@box.local reboot$'
   [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
+}
+
+@test "without kstat, ssh that never drops means the reboot was lost; it is sent again" {
+  cat > "$FAKE_BIN/ssh.script" <<'EOS'
+case "$*" in
+  *kstat*) exit 1 ;;
+  *root@box.local\ true) n=$(grep -c 'reboot$' "$FAKE_LOG"); if (( n >= 2 )); then exit 255; else exit 0; fi ;;
+  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
+  *) exit 0 ;;
+esac
+EOS
+  HOMICRON_REBOOT_TIMEOUT=2 run "$REPO/bin/homicron" apply box
+  [ "$(fake_calls | grep -c 'reboot$')" -ge 2 ]
+  [[ "$output" == *"has not rebooted yet"* ]]
+}
+
+@test "an unknown variable in the hosts file exits 2 with the line number before rsync" {
+  printf 'HOMICRON_USER=jacob\nHOMICRON_UID=501\nVOXEL_SLED=8\n' > "$REPO/hosts/typo.env"
+  run "$REPO/bin/homicron" apply typo
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"typo.env line 3"* ]]
+  [[ "$output" == *"VOXEL_SLED"* ]]
+  refute_called '^rsync'
 }
 
 @test "exit 255 reports unreachable and exits 1" {

@@ -75,7 +75,8 @@ make_checkout() {
   make_checkout
   printf 'case "$1" in rev-parse) [[ $* == *--verify* ]] && exit 1; echo abc123 ;; esac; exit 0\n' > "$FAKE_BIN/git.script"
   run "$STEP"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VOXEL_REF main names no commit"* ]]
   ! grep -q 'git checkout' "$FAKE_LOG.su"
   ! grep -q 'cargo build' "$FAKE_LOG.su"
 }
