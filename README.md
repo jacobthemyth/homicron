@@ -31,12 +31,19 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
    printf '<one-nexus-address> recovery.sys.rack1.oxide.test\n' | sudo tee -a /etc/hosts
    ```
 
-   If the launch fails, `svcs -xv site/voxel-rack` names the state and `/var/log/voxel-rack.log` holds voxel's output. `svcadm clear site/voxel-rack` retries. `svcadm disable site/voxel-rack` destroys the rack and `svcadm restart site/voxel-rack` rebuilds it. A `pfexec voxel destroy` by hand leaves the service online with no rack, so use `svcadm` for the rack's lifecycle. The service waits for `site/homicron-apply` to be online, so a rack never launches while an apply runs. To recreate rack content after each launch, put an executable `~/.config/voxel/post-launch.sh` on the machine. It runs as your login after every successful launch against an empty rack, and its exit status is logged but never fails the service. For example, with an [Oxide CLI](https://github.com/oxidecomputer/oxide.rs) token in `OXIDE_TOKEN`:
+   If the launch fails, `svcs -xv site/voxel-rack` names the state and `/var/log/voxel-rack.log` holds voxel's output. `svcadm clear site/voxel-rack` retries. `svcadm disable site/voxel-rack` destroys the rack and `svcadm restart site/voxel-rack` rebuilds it. A `pfexec voxel destroy` by hand leaves the service online with no rack, so use `svcadm` for the rack's lifecycle. The service waits for `site/homicron-apply` to be online, so a rack never launches while an apply runs. If someone disables `site/homicron-apply` by hand, the rack service waits forever, and `svcadm enable site/homicron-apply` is the fix. To recreate rack content after each launch, put an executable `~/.config/voxel/post-launch.sh` on the machine. It runs as your login after every successful launch against an empty rack, with a bound of ten minutes, and its exit status is logged but never fails the service. The rack is new every time, so an API token minted earlier is gone with it. The hook has to log in each run. The recovery silo takes a password login that returns a session cookie, so the example below uses that cookie for one API call:
 
    ```
    #!/bin/bash
-   export OXIDE_HOST=https://recovery.sys.rack1.oxide.test OXIDE_TOKEN=<token>
-   oxide --insecure project create --name lab --description "created by post-launch.sh"
+   set -o errexit
+   host=https://recovery.sys.rack1.oxide.test
+   nexus=$(dig +short @198.51.100.20 recovery.sys.rack1.oxide.test A | head -1)
+   jar=$(mktemp)
+   curl -k -sS --resolve "recovery.sys.rack1.oxide.test:443:$nexus" -c "$jar" -H 'Content-Type: application/json' \
+     -d '{"username":"recovery","password":"oxide"}' "$host/v1/login/recovery/local"
+   curl -k -sS --resolve "recovery.sys.rack1.oxide.test:443:$nexus" -b "$jar" -H 'Content-Type: application/json' \
+     -d '{"name":"lab","description":"created by post-launch.sh"}' "$host/v1/projects"
+   rm -f "$jar"
    ```
 
 ## Known issue: Linux guests freeze under voxel

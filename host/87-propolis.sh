@@ -8,9 +8,11 @@
 # which stalled on 2026-11-02. The rev is the propolis-client rev pinned in
 # the voxel workspace Cargo.toml, the same rev falcon would fetch.
 #
-# The directory is root-owned and outside the user's home, so a
-# `voxel destroy` (which deletes .falcon/bin) never touches it. Old revs are
-# left in place.
+# The directory is on the rpool/homicron state dataset, which start-apply.sh
+# creates: outside /opt/homicron, which the runner's rsync --delete owns,
+# outside the user's home, where `voxel destroy` deletes .falcon/bin, and
+# outside the boot environment, so an OS update keeps it. Old revs are left
+# in place.
 #
 set -o errexit -o pipefail -o nounset
 # shellcheck disable=SC1091
@@ -19,7 +21,7 @@ source "$(dirname "$0")/lib.sh"
 home_root=${HOMICRON_HOME:-/home}
 src="$home_root/$HOMICRON_USER/src/voxel"
 voxel="$src/target/release/voxel"
-dir=${HOMICRON_PROPOLIS_DIR:-/opt/homicron/propolis}
+dir=${HOMICRON_PROPOLIS_DIR:-/var/homicron/propolis}
 base=https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/falcon
 curl_opts=(-fsSL --retry 5 --retry-all-errors)
 

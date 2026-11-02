@@ -260,7 +260,7 @@ git commit -m "Step 85: voxel.toml gets the images and the external mode, after 
 - Test: `test/step-propolis.bats`
 
 **Interfaces:**
-- Produces: `/opt/homicron/propolis/<rev>` (0755) and `<rev>.sha256` beside it; `falcon.propolis_binary` set to that path. Path override `HOMICRON_PROPOLIS_DIR` (default `/opt/homicron/propolis`).
+- Produces: `/var/homicron/propolis/<rev>` (0755) and `<rev>.sha256` beside it; `falcon.propolis_binary` set to that path. Path override `HOMICRON_PROPOLIS_DIR` (default `/var/homicron/propolis`).
 
 - [ ] **Step 1: Write the failing tests.** Setup: fakes `su` and `voxel` as in `test/step-voxel-conf.bats`; `export HOMICRON_PROPOLIS_DIR="$BATS_TEST_TMPDIR/propolis"`; a `Cargo.toml` at `$SRC/Cargo.toml` with the line `propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5e201ec4185ccb9182cc6ffcb09fadd9deee24ca" }`; `make_fake curl` whose script writes `$BATS_TEST_TMPDIR/body` to the `-o` target when the URL ends in `propolis-server`, and prints `$BATS_TEST_TMPDIR/digest` when it ends in `.sha256.txt`; `make_fake digest` printing the sha256 of its last argument (`shasum -a 256 "${*: -1}" | cut -d" " -f1` on the Mac; `digest -a sha256 FILE` is the illumos form the step calls). Fixture: `body` holds `binary`, `digest` holds its sha256.
 
@@ -547,7 +547,7 @@ MGMT_LINKS=igb1
 Run: `test/lint.sh && test/run-tests.sh`
 Expected: exit 0.
 
-- [ ] **Step 2: Apply.** `HOMICRON_ADDR=192.168.0.154 bin/homicron apply homicron00`. Expected in the stream: steps 10 to 80 `already in the desired state`; step 25 finds the dhcpagent line and chrony online; step 85 sets nothing new except that the existing `image.cp` matches; step 87 downloads the rev to `/opt/homicron/propolis/` and repoints `falcon.propolis_binary`; step 90 prints `voxel-rack enabled…`; `apply complete`.
+- [ ] **Step 2: Apply.** `HOMICRON_ADDR=192.168.0.154 bin/homicron apply homicron00`. Expected in the stream: steps 10 to 80 `already in the desired state`; step 25 finds the dhcpagent line and chrony online; step 85 sets nothing new except that the existing `image.cp` matches; step 87 downloads the rev to `/var/homicron/propolis/` and repoints `falcon.propolis_binary`; step 90 prints `voxel-rack enabled…`; `apply complete`.
 
 - [ ] **Step 3: Watch the service.** On the box: `svcs -xv site/voxel-rack` shows `offline*` during the launch and `online` after about ten minutes; `tail -f /var/log/voxel-rack.log` ends with `launch complete`. Then from the Mac: `curl -k -sS https://recovery.sys.rack1.oxide.test/v1/ping` prints `{"status":"ok"}`.
 

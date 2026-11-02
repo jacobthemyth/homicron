@@ -72,6 +72,13 @@ EOS
   refute_called '^voxel config set'
 }
 
+@test "the default directory is outside /opt/homicron, which the runner's rsync --delete owns" {
+  default=$(sed -n 's/^dir=\${HOMICRON_PROPOLIS_DIR:-\(.*\)}$/\1/p' "$STEP")
+  [ -n "$default" ]
+  [[ $default != /opt/homicron* ]]
+  [[ $default == /var/homicron/propolis ]]
+}
+
 @test "a Cargo.toml without the rev exits 1" {
   : > "$SRC/Cargo.toml"
   run "$STEP"

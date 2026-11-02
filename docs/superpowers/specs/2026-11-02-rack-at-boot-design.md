@@ -161,7 +161,7 @@ mode`.
 ## Step 87: the propolis binary
 
 `host/87-propolis.sh` follows the voxel checkout, whose `Cargo.toml` names
-the rev. End state: `/opt/homicron/propolis/<rev>`
+the rev. End state: `/var/homicron/propolis/<rev>`
 exists with mode 0755 and the digest buildomat publishes for that rev, and
 `falcon.propolis_binary` in voxel.toml names it.
 
@@ -169,16 +169,19 @@ exists with mode 0755 and the digest buildomat publishes for that rev, and
   `~/src/voxel/Cargo.toml`, the 40-hex value. A missing or malformed line
   exits 1 with `cannot read the propolis rev from voxel's Cargo.toml`.
 - `check`: the file exists, `digest -a sha256` matches the digest file
-  `/opt/homicron/propolis/<rev>.sha256` saved beside it, and
+  `/var/homicron/propolis/<rev>.sha256` saved beside it, and
   `voxel config get falcon.propolis_binary` returns the path.
 - `apply`: fetch the digest file first with `curl -fsSL --retry 5
   --retry-all-errors`, then the binary with the same flags plus `-C -`
   into `<rev>.part`, compare, rename, `chmod 0755`, and set the key. A
   digest mismatch deletes the part file and exits 1 with both digests.
-- Old revs under `/opt/homicron/propolis/` are left in place.
+- Old revs under `/var/homicron/propolis/` are left in place.
 
-The directory is root-owned, outside the user's home, so `voxel destroy`
-(which deletes `.falcon/bin`) never touches it.
+The directory is on the `rpool/homicron` state dataset that `start-apply.sh`
+creates. It is outside `/opt/homicron`, which the runner's rsync `--delete`
+owns and would empty on every apply, outside the user's home, where `voxel
+destroy` deletes `.falcon/bin`, and outside the boot environment, so an OS
+update keeps it.
 
 ## Step 90: the rack service
 
@@ -200,9 +203,14 @@ the manifest points.
   `offline*`) matches `VOXEL_RACK`.
 - `apply`: when the manifest differs or is missing, `svccfg validate`
   (print its output and exit 1 on failure), copy, `svccfg import` (an
-  idempotent upgrade as the apply spec describes). Then `svcadm enable`
-  or `svcadm disable` when the enabled state differs from `VOXEL_RACK`.
-  A converged box runs nothing. The step does not wait for the launch: it exits
+  idempotent upgrade as the apply spec describes). Then, when the enabled
+  state differs from `VOXEL_RACK`: `svcadm disable` for `no`; for `yes`,
+  `svcadm clear` when the service is in `maintenance` (it is enabled
+  already, and `enable` would change nothing), else `svcadm enable`. The
+  step then waits up to ten seconds for `svcs` to show the new state,
+  because `svcadm` returns before startd moves the instance. A converged
+  box runs nothing. Any `VOXEL_RACK` value other than `yes` or `no` exits 1
+  before anything runs. The step does not wait for the launch: it exits
   once the service is enabled, and the apply log says
   `voxel-rack enabled; the launch runs under svc:/site/voxel-rack, log
   /var/log/voxel-rack.log`. Enabling starts the launch at once on a
@@ -259,8 +267,11 @@ status.
    next `svcadm clear` starts over from step 2.
 5. On success, if `/home/$HOMICRON_USER/.config/voxel/post-launch.sh`
    exists and is executable, run it as `$HOMICRON_USER` with the log as
-   output. Its exit status is logged, and does not change the service's.
-   The rack is up either way; a broken hook must not take it down.
+   output, under `timeout 600`. Its exit status is logged (`timed out` for
+   124), and does not change the service's. The rack is up either way; a
+   broken or hanging hook must not take it down, and without the bound a
+   hanging hook would hit the method timeout, whose contract kill takes
+   the VMs with it.
 6. Exit 0. The service is `online`, which means the rack answered RSS.
 
 ### The stop method
@@ -323,7 +334,7 @@ drop the runner's ssh; the apply service makes that harmless.
 The box already has `voxel.toml` with the image keys, isolated mode, the
 uplink, and `falcon.propolis_binary` pointing into `~/bin`. Step 85 finds
 every key already set except that its own value for `image.cp` matches.
-Step 87 downloads the same rev to `/opt/homicron/propolis/` and repoints
+Step 87 downloads the same rev to `/var/homicron/propolis/` and repoints
 `falcon.propolis_binary`; the copy in `~/bin` can be deleted by hand. Step
 25 finds the dhcpagent line present and chrony online. Step 90 installs and
 enables the service, which destroys the running rack and relaunches it

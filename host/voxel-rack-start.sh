@@ -66,10 +66,19 @@ fi
 rm -f "$capture"
 
 hook="$config/post-launch.sh"
+hook_timeout=${HOMICRON_HOOK_TIMEOUT:-600}
 if [[ -x $hook ]]; then
   say "running $hook"
-  su - "$HOMICRON_USER" -c "$hook" < /dev/null >> "$log" 2>&1
-  say "post-launch.sh exited $?"
+  # The VMs live in this method's contract. A hook that never returns would
+  # hit the method timeout, and startd would kill the contract, rack and
+  # all. So the hook gets its own, shorter bound.
+  timeout "$hook_timeout" su - "$HOMICRON_USER" -c "$hook" < /dev/null >> "$log" 2>&1
+  hook_status=$?
+  if (( hook_status == 124 )); then
+    say "post-launch.sh timed out after ${hook_timeout}s"
+  else
+    say "post-launch.sh exited $hook_status"
+  fi
 fi
 
 say "rack up"

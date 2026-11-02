@@ -86,6 +86,15 @@ EOS
   assert_called '^su - vmuser -c .*post-launch.sh'
 }
 
+@test "start: a hook that hangs is stopped and the rack stays up" {
+  printf '#!/bin/bash\necho hook started; sleep 30; echo hook finished\n' > "$CONFIG/post-launch.sh"; chmod +x "$CONFIG/post-launch.sh"
+  HOMICRON_HOOK_TIMEOUT=1 run "$HOST/voxel-rack-start.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'hook started' "$HOMICRON_RACK_LOG"
+  ! grep -q 'hook finished' "$HOMICRON_RACK_LOG"
+  grep -q 'post-launch.sh timed out after 1s' "$HOMICRON_RACK_LOG"
+}
+
 @test "start: a hook that is not executable does not run" {
   printf 'echo hook ran\n' > "$CONFIG/post-launch.sh"
   run "$HOST/voxel-rack-start.sh"

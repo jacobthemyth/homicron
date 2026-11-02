@@ -16,7 +16,38 @@ setup() {
   echo disabled > "$STATES"
   make_fake svcs
   printf 'cat "$STATES"\n' > "$FAKE_BIN/svcs.script"
-  printf 'case $1 in enable) echo online > "$STATES" ;; disable) echo disabled > "$STATES" ;; esac\n' > "$FAKE_BIN/svcadm.script"
+  printf 'case $1 in enable|clear) echo online > "$STATES" ;; disable) echo disabled > "$STATES" ;; esac\n' > "$FAKE_BIN/svcadm.script"
+  make_fake sleep
+}
+
+@test "a service in maintenance is cleared, not enabled again" {
+  cp "$HOMICRON_DIR/voxel-rack.xml" "$HOMICRON_MANIFEST_DIR/"
+  echo maintenance > "$STATES"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  assert_called '^svcadm clear site/voxel-rack$'
+  refute_called '^svcadm enable'
+  [[ "$output" == *"voxel-rack cleared; the launch retries under svc:/site/voxel-rack"* ]]
+}
+
+@test "waits for startd to move the instance after svcadm" {
+  # svcadm returns before the state changes: the fake flips the state only
+  # on the third svcs call after it.
+  printf 'n=$(grep -c "^svcs" "$FAKE_LOG"); if grep -q "^svcadm enable" "$FAKE_LOG" && (( n >= 4 )); then echo online; else cat "$STATES"; fi\n' > "$FAKE_BIN/svcs.script"
+  printf 'exit 0\n' > "$FAKE_BIN/svcadm.script"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  assert_called '^svcadm enable site/voxel-rack$'
+  assert_called '^sleep '
+}
+
+@test "VOXEL_RACK other than yes or no exits 1 and touches nothing" {
+  cp "$HOMICRON_DIR/voxel-rack.xml" "$HOMICRON_MANIFEST_DIR/"
+  echo online > "$STATES"
+  VOXEL_RACK=true run "$STEP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VOXEL_RACK must be yes or no, not true"* ]]
+  refute_called '^svcadm'
 }
 
 @test "validates, installs, imports, and enables" {
