@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<!--
+    voxel rack service. Step 90 installs this manifest; the two methods
+    ship in /opt/homicron with every rsync. Transient: the start method
+    destroys the previous rack and launches a new one, then exits, and the
+    VMs it started live on. The stop method destroys the rack.
+
+    The dependency on site/homicron-apply is the hold during an apply:
+    that service is online only when the box has converged and its method
+    is idle, so a rack never launches while steps run or after a failed
+    apply left the service in maintenance. restart_on none keeps a running
+    rack alive while a later apply restarts homicron-apply.
+-->
+<service_bundle type='manifest' name='voxel-rack'>
+<service name='site/voxel-rack' type='service' version='1'>
+    <create_default_instance enabled='false' />
+    <single_instance />
+
+    <dependency
+        name='multi-user-server'
+        grouping='require_all'
+        restart_on='none'
+        type='service'>
+        <service_fmri value='svc:/milestone/multi-user-server:default' />
+    </dependency>
+
+    <dependency
+        name='homicron-apply'
+        grouping='require_all'
+        restart_on='none'
+        type='service'>
+        <service_fmri value='svc:/site/homicron-apply:default' />
+    </dependency>
+
+    <exec_method
+        type='method'
+        name='start'
+        exec='/opt/homicron/voxel-rack-start.sh'
+        timeout_seconds='2400' />
+
+    <exec_method
+        type='method'
+        name='stop'
+        exec='/opt/homicron/voxel-rack-stop.sh'
+        timeout_seconds='600' />
+
+    <property_group name='startd' type='framework'>
+        <propval name='duration' type='astring' value='transient' />
+    </property_group>
+
+    <stability value='Unstable' />
+
+    <template>
+        <common_name>
+            <loctext xml:lang='C'>
+                voxel rack: destroy and relaunch at boot
+            </loctext>
+        </common_name>
+    </template>
+</service>
+</service_bundle>
