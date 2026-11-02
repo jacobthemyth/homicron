@@ -56,13 +56,16 @@ dataset_exists() {
   zfs list -H -o name "$dataset" >/dev/null 2>&1
 }
 
+# Both readers are awk programs that consume the whole listing. `grep -q`
+# would exit at the first match, and under pipefail a producer still writing
+# then dies of SIGPIPE and fails the pipeline at random.
 has_profile() {
   # profiles(1) prints a "user:" header and indents each profile name.
-  profiles "$user" 2>/dev/null | sed 's/^[[:space:]]*//' | grep -qx 'Primary Administrator'
+  profiles "$user" 2>/dev/null | awk '{ sub(/^[[:space:]]*/, "") } $0 == "Primary Administrator" { found = 1 } END { exit !found }'
 }
 
 has_icmp_priv() {
-  userattr defaultpriv "$user" 2>/dev/null | grep -q 'net_icmpaccess'
+  userattr defaultpriv "$user" 2>/dev/null | awk '/net_icmpaccess/ { found = 1 } END { exit !found }'
 }
 
 # A line that is not blank and not a comment is a key, indented or not.

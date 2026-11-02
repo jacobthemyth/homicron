@@ -144,3 +144,20 @@ setup() {
   run "$STEP"
   grep -q '^PATH=/usr/bin:/usr/sbin:/usr/gnu/bin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/su"
 }
+
+@test "long listings after the match still count as present" {
+  # grep -q exits at the first match; under pipefail a producer still writing
+  # dies of SIGPIPE and the pipeline fails at random. The fakes end with seq
+  # so that status propagates.
+  printf 'echo "vmuser:x:501:10::/home/vmuser:/bin/bash"\n' > "$FAKE_BIN/getent.script"
+  printf 'printf "vmuser:\\n          Primary Administrator\\n"; seq 1 300000\n' > "$FAKE_BIN/profiles.script"
+  printf 'echo "basic,net_icmpaccess"; seq 1 300000\n' > "$FAKE_BIN/userattr.script"
+  mkdir -p "$HOMICRON_HOME/vmuser/.ssh" "$HOMICRON_ROOT_HOME/.ssh"
+  cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/vmuser/.ssh/"
+  cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_ROOT_HOME/.ssh/"
+  printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
+  printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/su"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in the desired state"* ]]
+}

@@ -21,8 +21,11 @@ zvol_exists() {
   zfs list -H -o name "$1" >/dev/null 2>&1
 }
 
+# The two readers are awk programs that consume the whole listing. `grep -q`
+# would exit at the first match, and under pipefail a producer still writing
+# then dies of SIGPIPE and fails the pipeline at random.
 swap_active() {
-  swap -l 2>/dev/null | grep -q "^$swap_dev "
+  swap -l 2>/dev/null | awk -v dev="$swap_dev" '$1 == dev { found = 1 } END { exit !found }'
 }
 
 vfstab_has_swap() {
@@ -30,7 +33,7 @@ vfstab_has_swap() {
 }
 
 dump_configured() {
-  dumpadm 2>/dev/null | grep -q "$dump_dev"
+  dumpadm 2>/dev/null | awk -v dev="$dump_dev" 'index($0, dev) { found = 1 } END { exit !found }'
 }
 
 check() {

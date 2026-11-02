@@ -33,3 +33,12 @@ setup() {
   assert_called '^dumpadm -d /dev/zvol/dsk/rpool/dump$'
   [ "$(grep -c -F "$VFSTAB_LINE" "$HOMICRON_ETC/vfstab")" -eq 1 ]
 }
+
+@test "long listings after the match still count as set up" {
+  printf 'echo "swapfile dev swaplo blocks free"; echo "/dev/zvol/dsk/rpool/swap 1,2 8 100 100"; seq 1 300000\n' > "$FAKE_BIN/swap.script"
+  printf 'echo "       Dump device: /dev/zvol/dsk/rpool/dump (dedicated)"; seq 1 300000\n' > "$FAKE_BIN/dumpadm.script"
+  printf '%s\n' "$VFSTAB_LINE" >> "$HOMICRON_ETC/vfstab"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in the desired state"* ]]
+}

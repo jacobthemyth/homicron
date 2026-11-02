@@ -76,3 +76,15 @@ EOS
   [ "$status" -eq 0 ]
   refute_called 'image create'
 }
+
+@test "a long image list after the names still counts as present" {
+  cat > "$SRC/target/release/voxel" <<EOS
+#!/bin/bash
+printf '%s\n' "voxel \$*" >> "$FAKE_LOG"
+printf 'images under rpool/falcon/img:\n\n   IMAGE SIZE CREATED COMMIT\n   voxel-frr-proto 1.3G x -\n*  voxel-cp-abc 10G x abc\n\n* = current image.cp\n'
+seq 1 300000
+EOS
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in the desired state"* ]]
+}
