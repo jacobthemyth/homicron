@@ -21,7 +21,13 @@ printf '%s\n' "voxel \$*" >> "$FAKE_LOG"
 case "\$1 \$2" in
   "image list")
     printf 'images under rpool/falcon/img:\n\n  %-50s %-6s %-22s %s\n' IMAGE SIZE CREATED COMMIT
-    while read -r name; do printf '  %-50s %-6s %-22s %s\n' "\$name" 1.3G "Mon Nov  2 23:40 2026" -; done < "$IMAGES" ;;
+    # A name that starts with * is the current image.cp: voxel marks that row
+    # with * in the first column and adds a footer.
+    while read -r name; do
+      if [[ \$name == \** ]]; then printf '*  %-50s %-6s %-22s %s\n' "\${name#\*}" 10.2G "Mon Nov  2 23:37 2026" abc123; marked=1
+      else printf '   %-50s %-6s %-22s %s\n' "\$name" 1.3G "Mon Nov  2 23:40 2026" -; fi
+    done < "$IMAGES"
+    [[ -n \${marked:-} ]] && printf '\n* = current image.cp\n' ;;
   "image create")
     [[ -e "$FAKE_BIN/voxel-create-fails" ]] && exit 1
     echo voxel-cp-abc123 >> "$IMAGES" ;;
@@ -62,4 +68,11 @@ EOS
   [ "$status" -ne 0 ]
   assert_called 'image create$'
   refute_called 'create-frr'
+}
+
+@test "the current image marked with * is still seen" {
+  printf 'voxel-frr-proto\n*voxel-cp-77901ac4bb2d6e1ac6dd7380b3758129b73f69cd\n' > "$IMAGES"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  refute_called 'image create'
 }

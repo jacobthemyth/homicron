@@ -15,8 +15,10 @@ home_root=${HOMICRON_HOME:-/home}
 voxel="$home_root/$HOMICRON_USER/src/voxel/target/release/voxel"
 
 # Image names, one per line: the first column of the table after its header.
+# The row for the image that image.cp names starts with a * marker, and a
+# footer explains it; the name is then the second column.
 images() {
-  as_user "$voxel image list" | awk 'NR > 3 && NF { print $1 }'
+  as_user "$voxel image list" | awk 'NR > 3 && NF { print ($1 == "*") ? $2 : $1 }'
 }
 
 have_cp() {
