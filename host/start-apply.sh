@@ -63,25 +63,38 @@ ensure_state_dataset
 mkdir -p "$manifest_dir" "$state_dir"
 cp "$manifest" "$installed"
 svccfg import "$installed"
-boot_time > "$marker"
+
+# Write the marker, then run the svcadm verb. The marker must exist before
+# the method starts, and must not outlive a svcadm that failed.
+start_with() {
+  boot_time > "$marker"
+  if ! svcadm "$1" "$fmri"; then
+    rm -f "$marker"
+    echo "svcadm $1 $fmri failed"
+    exit 1
+  fi
+}
 
 current=$(state)
 case $current in
   offline|offline\*|*\*)
+    # A run is pending or in progress. The marker makes a pending boot-time
+    # run do the apply rather than exit at once.
+    boot_time > "$marker"
     echo "an apply is already running on the box"
     ;;
   maintenance)
-    svcadm clear "$fmri"
+    start_with clear
     wait_for_change "$current"
     echo "cleared the failed run and started"
     ;;
   disabled|uninitialized|missing)
-    svcadm enable "$fmri"
+    start_with enable
     wait_for_change "$current"
     echo "enabled and started"
     ;;
   online)
-    svcadm restart "$fmri"
+    start_with restart
     wait_for_change "$current"
     echo "restarted"
     ;;

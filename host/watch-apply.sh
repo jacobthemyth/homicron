@@ -13,6 +13,7 @@
 #   1  maintenance: a step failed
 #   3  any other settled state (printed as "service is <state>")
 #   4  still running after <max-seconds>
+#   5  the ssh session ended (this script was reparented)
 #
 # The runner counts the lines it received, so a reconnect after a reboot or
 # a dropped connection passes the count back and no line is shown twice.
@@ -26,6 +27,17 @@ fmri=site/homicron-apply
 seen=${1:?usage: watch-apply.sh <lines-already-seen> <max-seconds>}
 max=${2:?usage: watch-apply.sh <lines-already-seen> <max-seconds>}
 waited=0
+
+# When the ssh client disconnects, the sshd session that started this script
+# exits and the script is reparented to init. The loop below notices, so a
+# runner that was killed does not leave this script polling for hours.
+parent=$PPID
+
+client_gone() {
+  local now
+  now=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')
+  [[ -n $now && $now != "$parent" ]]
+}
 
 while true; do
   total=0
@@ -45,6 +57,9 @@ while true; do
     offline|offline\*|*\*|missing)
       if (( waited >= max )); then
         exit 4
+      fi
+      if client_gone; then
+        exit 5
       fi
       sleep 1
       waited=$((waited + 1))

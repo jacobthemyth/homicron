@@ -73,3 +73,22 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == $'two\nthree\nfour' ]]
 }
+
+@test "stops polling once its parent is gone (the ssh session ended)" {
+  make_fake svcs 0 'offline*'
+  # The outer bash lives long enough for the watcher to record it as its
+  # parent, then exits, so the watcher is reparented. /bin/sleep: the fake
+  # sleep on PATH returns at once.
+  bash -c 'bash -c "exec \"\$0\" 3 1000" "$0" & /bin/sleep 0.5; exit 0' "$WATCH"
+  at_exit=$(fake_calls | grep -c '^sleep 1$')
+  /bin/sleep 1
+  # a few polls to notice, not the thousand the deadline allows
+  [ "$(( $(fake_calls | grep -c '^sleep 1$') - at_exit ))" -lt 5 ]
+  ! pgrep -f "watch-apply.sh 3 1000" >/dev/null
+}
+
+@test "a live parent keeps the watch going" {
+  run "$WATCH" 1 60
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'two\nthree' ]]
+}

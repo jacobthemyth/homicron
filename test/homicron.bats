@@ -278,6 +278,28 @@ EOS
   assert_called 'watch-apply.sh 6 7200$'
 }
 
+@test "attaching with no run header in the log starts after the existing lines" {
+  box_fake
+  printf 'offline* 10:00:00\n' > "$STATE"
+  printf '42\n' > "$LOG_LINES"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called 'watch-apply.sh 42 7200$'
+}
+
+@test "a reboot line then 255, without kstat, does not take a box that has not gone down yet for a rebooted one" {
+  box_fake
+  printf 'rebooting for 30-pkg.sh\n' > "$STREAM.1"; printf '255\n' > "$WATCH_EXIT.1"
+  printf 'apply complete\n' > "$STREAM.2"; printf '0\n' > "$WATCH_EXIT.2"
+  sed -i '' 's|\*kstat\*) .*|*kstat*) exit 1 ;;|' "$FAKE_BIN/ssh.script"
+  # still up on the first poll, down for two, then back
+  sed -i '' 's|\*) exit 0 ;;|*root@box.local\\ true) t=$(grep -c "true$" "$FAKE_LOG"); if (( t == 2 \|\| t == 3 )); then exit 255; else exit 0; fi ;;\n  *) exit 0 ;;|' "$FAKE_BIN/ssh.script"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c 'true$')" -eq 4 ]
+  [ "$(fake_calls | grep -c 'watch-apply.sh')" -eq 2 ]
+}
+
 @test "ssh subcommand uses the user and port, without keepalives" {
   run "$REPO/bin/homicron" ssh box
   assert_called '^ssh -p 2222 .*vmuser@box.local$'

@@ -257,12 +257,17 @@ log_lines() {
   printf '%s\n' "${n:-0}"
 }
 
-# The line before the current run's header, so an attach starts at the header.
+# The line before the current run's header, so an attach starts at the
+# header. With no header to find, the lines already there are not replayed.
 run_header_offset() {
   local n
   n=$(remote "grep -n '^=== run' $remote_log 2>/dev/null | tail -1 | cut -d: -f1") || n=
   n=${n// /}
-  printf '%s\n' "$(( ${n:-1} - 1 ))"
+  if [[ -z $n ]]; then
+    log_lines
+    return
+  fi
+  printf '%s\n' "$(( n - 1 ))"
 }
 
 # The ssh carrying the stream dropped. Wait until the box answers again:
@@ -271,7 +276,7 @@ run_header_offset() {
 # first answer is enough. Past the deadline the apply is still running on
 # the box, so the message says how to rejoin.
 wait_for_box() {
-  local before="$1" rebooting="$2" name="$3" after deadline
+  local before="$1" rebooting="$2" name="$3" after deadline went_down=no
   if [[ $rebooting == yes ]]; then
     printf 'waiting for the box to come back\n'
   else
@@ -283,8 +288,17 @@ wait_for_box() {
       die "cannot reach $HOMICRON_ADDR after ${reboot_timeout}s; the apply continues on the box, rejoin with homicron apply $name"
     fi
     sleep "$poll"
-    remote true >/dev/null 2>&1 || continue
-    [[ $rebooting == yes && -n $before ]] || return 0
+    if ! remote true >/dev/null 2>&1; then
+      went_down=yes
+      continue
+    fi
+    [[ $rebooting == yes ]] || return 0
+    if [[ -z $before ]]; then
+      # No boot time to compare: the box must have been seen down first,
+      # or this is still the old system on its way down.
+      [[ $went_down == yes ]] && return 0
+      continue
+    fi
     after=$(boot_time) || continue
     [[ -n $after && $after != "$before" ]] && return 0
   done

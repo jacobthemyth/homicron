@@ -116,3 +116,18 @@ setup() {
   [ "$status" -eq 1 ]
   [[ "$output" == *degraded* ]]
 }
+
+@test "an unexpected state leaves no marker behind" {
+  printf 'degraded\n' > "$STATES"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 1 ]
+  [ ! -e "$HOMICRON_STATE_DIR/apply-requested" ]
+}
+
+@test "a failing svcadm removes the marker and exits 1" {
+  make_fake svcadm 1
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"svcadm enable"* ]]
+  [ ! -e "$HOMICRON_STATE_DIR/apply-requested" ]
+}
