@@ -1,10 +1,13 @@
 #!/bin/bash
 #
 # homicron first-boot service. Runs once on the first boot after
-# install-helios: brings up DHCP on every physical link, enables sshd and
-# mDNS, reports the addresses on the console, then disables itself. DNS
-# comes from the dhcpagent event hook (firstboot/dhcp-eventhook), which the
-# installer seeds to /etc/dhcp/eventhook.
+# install-helios: brings up DHCP and IPv6 autoconfiguration on every
+# physical link that has a cable, enables sshd and mDNS, reports the
+# addresses on the console, then disables itself. DNS comes from the
+# dhcpagent event hook (firstboot/dhcp-eventhook), which the installer seeds
+# to /etc/dhcp/eventhook. A link without a cable gets nothing: a DHCP
+# address object on it sits in `inaccessible` for the life of the machine
+# and mDNS advertises 0.0.0.0 for it.
 #
 # This method must always exit 0. A failing method would put the service in
 # maintenance and hide the console login.
@@ -17,6 +20,7 @@ PATH="$PATH:/sbin"
 conf=${HOMICRON_CONF:-/etc/homicron.conf}
 msglog=${HOMICRON_MSGLOG:-/dev/msglog}
 dhcp_wait=${HOMICRON_DHCP_WAIT:-60}
+link_wait=${HOMICRON_LINK_WAIT:-10}
 eventhook=${HOMICRON_EVENTHOOK:-/etc/dhcp/eventhook}
 
 HOSTNAME=unknown
@@ -30,14 +34,49 @@ say() {
   printf 'homicron-firstboot: %s\n' "$*" >> "$msglog" 2>/dev/null
 }
 
+has_addrobj() {
+  ipadm show-addr -p -o addrobj 2>/dev/null | grep -qx "$1"
+}
+
 has_v4_addrobj() {
-  ipadm show-addr -p -o addrobj 2>/dev/null | grep -qx "$1/v4"
+  has_addrobj "$1/v4"
+}
+
+# Links whose state is up. A driver can report down for a moment after it
+# attaches, so wait a little for the first link to come up.
+up_links() {
+  dladm show-phys -p -o link,state 2>/dev/null | awk -F: '$2 == "up" { print $1 }'
+}
+
+is_up() {
+  local l
+  for l in $up; do
+    [[ $l == "$1" ]] && return 0
+  done
+  return 1
 }
 
 say "host $HOSTNAME: configuring network"
 
 links=$(dladm show-phys -p -o link 2>/dev/null)
+up=
+for (( i = 0; i < link_wait; i++ )); do
+  up=$(up_links)
+  if [[ -n $up ]]; then
+    break
+  fi
+  sleep 1
+done
+
 for link in $links; do
+  if ! is_up "$link"; then
+    say "$link has no link; skipped (after cabling it: ipadm create-addr -T dhcp $link/v4)"
+    continue
+  fi
+  if ! has_addrobj "$link/v6"; then
+    # addrconf is persistent: the link keeps its SLAAC address on every boot.
+    ipadm create-addr -T addrconf "$link/v6" || say "ipadm create-addr addrconf failed on $link"
+  fi
   if has_v4_addrobj "$link"; then
     say "$link already has a v4 address object"
     continue
@@ -61,9 +100,19 @@ svcadm enable network/dns/multicast || say "could not enable network/dns/multica
 
 # Wait for a real IPv4 address. ipadm prints `?` for a DHCP address object
 # that has no lease yet, so match a dotted address and skip loopback.
+v4_addrs() {
+  ipadm show-addr -p -o addr 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | grep -v '^127\.'
+}
+
+# Global and site-local v6 addresses; not link-local, not ::1. Parsable
+# ipadm output escapes every colon as \:.
+v6_addrs() {
+  ipadm show-addr -p -o addr 2>/dev/null | tr -d '\134' | grep -E '^[0-9a-f]+:' | grep -Ev '^(fe80:|::1/)'
+}
+
 addrs=
 for (( i = 0; i < dhcp_wait; i++ )); do
-  addrs=$(ipadm show-addr -p -o addr 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | grep -v '^127\.')
+  addrs=$(v4_addrs)
   if [[ -n $addrs ]]; then
     break
   fi
@@ -73,13 +122,13 @@ done
 # Run the hook now for every link that already has a lease, so the common
 # case does not wait for dhcpagent's callback. The hook ignores a link
 # without DNS servers, and dhcpagent runs it again when a lease lands later.
-for link in $links; do
+for link in $up; do
   "$eventhook" "$link" BOUND || say "dhcp hook failed on $link"
 done
 
 if [[ -n $addrs ]]; then
   say "host $HOSTNAME is reachable at:"
-  for a in $addrs; do
+  for a in $addrs $(v6_addrs); do
     say "  $a"
   done
 else

@@ -14,7 +14,7 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
 
    One disk makes a single-disk pool, two make a mirror, three make raidz1. `HOMICRON_KEYS_URL` names the public keys root will accept, and GitHub serves an account's keys at `https://github.com/<user>.keys`. The `resolv.conf` step is required: the installer ramdisk ships an empty `/etc/resolv.conf` and DHCP does not fill it, so without it `curl` cannot resolve the name. Downloading to a file first means a failed download stops the line instead of feeding an empty script to `bash`.
 4. When it prints `install complete; remove the media and run: reboot`, do so.
-5. On first boot the machine prints its address on the console. It has sshd and mDNS enabled and root accepts the keys the install line named. A dhcpagent hook writes `/etc/resolv.conf` from every lease.
+5. On first boot the machine brings up DHCP and IPv6 autoconfiguration on every cabled NIC and prints its addresses on the console. It has sshd and mDNS enabled and root accepts the keys the install line named. A dhcpagent hook writes `/etc/resolv.conf` from every lease. A NIC cabled later needs `ipadm create-addr -T dhcp <nic>/v4` by hand.
 6. Create `hosts/<hostname>.env` (see [hosts/README.md](hosts/README.md)) and run:
 
    ```
@@ -50,7 +50,7 @@ Confirm by booting once with the first disk detached. The pool reports DEGRADED 
 | Stage | Where | What |
 |---|---|---|
 | `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with the keys from `HOMICRON_KEYS_URL`, the first-boot service, the DNS hook, the ramdisk's resolv.conf, and `/etc/homicron.conf` |
-| `firstboot/` | first boot, once | DHCP on every physical NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the address, disable itself |
+| `firstboot/` | first boot, once | DHCP and IPv6 autoconfiguration on every cabled NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the addresses, disable itself |
 | `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, `voxel.toml` |
 
 ## Rehearse in a VM

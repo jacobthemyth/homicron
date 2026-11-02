@@ -4,9 +4,13 @@ SCRIPT="$BATS_TEST_DIRNAME/../firstboot/homicron-firstboot"
 
 setup() {
   fakes_setup
-  export HOMICRON_CONF="$BATS_TEST_TMPDIR/homicron.conf" HOMICRON_MSGLOG="$BATS_TEST_TMPDIR/msglog" HOMICRON_DHCP_WAIT=1
+  export HOMICRON_CONF="$BATS_TEST_TMPDIR/homicron.conf" HOMICRON_MSGLOG="$BATS_TEST_TMPDIR/msglog" HOMICRON_DHCP_WAIT=1 HOMICRON_LINK_WAIT=1
   printf 'HOSTNAME=host01\nKEYS_URL=https://github.com/user.keys\n' > "$HOMICRON_CONF"
-  make_fake dladm 0 $'rge0\nrge1'
+  # Two links, both up. Tests that need a down link overwrite $LINK_STATE.
+  make_fake dladm
+  export LINK_STATE="$BATS_TEST_TMPDIR/link-state"
+  printf 'rge0:up\nrge1:up\n' > "$LINK_STATE"
+  printf 'if [[ $* == *link,state* ]]; then cat "$LINK_STATE"; else cut -d: -f1 "$LINK_STATE"; fi; exit 0\n' > "$FAKE_BIN/dladm.script"
   make_fake svcadm
   make_fake ipadm
   make_fake eventhook
@@ -58,7 +62,7 @@ setup() {
 }
 
 @test "a nonzero -w 0 that still created the address object is not an error" {
-  printf '[[ $1 == create-addr ]] && exit 1; [[ $1 == show-addr && $* == *addrobj* ]] && { grep -q "^ipadm create-addr" "$FAKE_LOG" && printf "rge0/v4\\nrge1/v4\\n"; }; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  printf '[[ $1 == create-addr && $* == *dhcp* ]] && exit 1; [[ $1 == show-addr && $* == *addrobj* ]] && { grep -q "^ipadm create-addr" "$FAKE_LOG" && printf "rge0/v4\\nrge1/v4\\n"; }; exit 0\n' > "$FAKE_BIN/ipadm.script"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   refute_called '^ipadm create-addr -T dhcp -w 1'
@@ -89,6 +93,48 @@ setup() {
   [ "$status" -eq 0 ]
   grep -q 'dhcp hook' "$HOMICRON_MSGLOG"
   assert_called '^svcadm disable site/homicron-firstboot$'
+}
+
+@test "a link that is down gets no DHCP, no addrconf, and no hook, and is reported" {
+  printf 'rge0:up\nrge1:down\n' > "$LINK_STATE"
+  printf '[[ $1 == show-addr ]] && [[ $* == *-o\\ addr* ]] && echo "10.0.2.15/24"; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_called '^ipadm create-addr -T dhcp -w 0 rge0/v4$'
+  refute_called 'rge1/v[46]$'
+  refute_called '^eventhook rge1'
+  grep -q 'rge1 has no link' "$HOMICRON_MSGLOG"
+  grep -q 'ipadm create-addr -T dhcp rge1/v4' "$HOMICRON_MSGLOG"
+}
+
+@test "waits for a link to come up before deciding" {
+  export HOMICRON_LINK_WAIT=5
+  printf 'rge0:down\nrge1:down\n' > "$LINK_STATE"
+  # The third state query finds rge0 up.
+  printf 'if [[ $* == *link,state* ]]; then n=$(grep -c "link,state" "$FAKE_LOG"); (( n >= 3 )) && printf "rge0:up\\nrge1:down\\n" || cat "$LINK_STATE"; else cut -d: -f1 "$LINK_STATE"; fi; exit 0\n' > "$FAKE_BIN/dladm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  assert_called '^ipadm create-addr -T dhcp -w 0 rge0/v4$'
+  refute_called 'rge1/v4$'
+}
+
+@test "requests addrconf v6 on every up link without a v6 address object" {
+  printf '[[ $1 == show-addr ]] && [[ $* == *addrobj* ]] && echo "rge0/v6"; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  refute_called '^ipadm create-addr -T addrconf rge0/v6$'
+  assert_called '^ipadm create-addr -T addrconf rge1/v6$'
+  assert_called '^ipadm create-addr -T dhcp -w 0 rge0/v4$'
+}
+
+@test "reports global v6 addresses, not link-local, with the colons unescaped" {
+  printf '[[ $1 == show-addr ]] && [[ $* == *-o\\ addr* ]] && printf "10.0.2.15/24\\nfe80\\\\:\\\\:1%%%%rge0/10\\nfd69\\\\:\\\\:5/64\\n"; exit 0\n' > "$FAKE_BIN/ipadm.script"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -q '  10.0.2.15/24' "$HOMICRON_MSGLOG"
+  grep -q '  fd69::5/64' "$HOMICRON_MSGLOG"
+  ! grep -q 'fe80' "$HOMICRON_MSGLOG"
+  ! grep -q '\\' "$HOMICRON_MSGLOG"
 }
 
 @test "manifest is well-formed xml" {
