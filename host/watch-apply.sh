@@ -6,7 +6,8 @@
 #   watch-apply.sh <lines-already-seen> <max-seconds>
 #
 # Prints the log lines after the offset as they appear, polling once a
-# second while the method runs, and exits
+# second while the method runs or is waiting for its dependencies (any
+# `offline` state, or a transitional state marked with `*`), and exits
 #
 #   0  online: the apply converged
 #   1  maintenance: a step failed
@@ -18,8 +19,8 @@
 #
 set -o nounset -o pipefail
 
-log_dir=${HOMICRON_LOG_DIR:-/var/log/homicron}
-log="$log_dir/apply.log"
+state_dir=${HOMICRON_STATE_DIR:-/var/homicron}
+log="$state_dir/apply.log"
 fmri=site/homicron-apply
 
 seen=${1:?usage: watch-apply.sh <lines-already-seen> <max-seconds>}
@@ -32,13 +33,16 @@ while true; do
     total=$(wc -l < "$log")
     total=${total// /}
   fi
+  # Exactly the counted range: a line still being written is left for the
+  # next pass, so nothing is printed twice and the count stays in step.
   if (( total > seen )); then
-    sed -n "$((seen + 1)),\$p" "$log"
+    sed -n "$((seen + 1)),${total}p" "$log"
     seen=$total
   fi
-  state=$(svcs -H -o state "$fmri" 2>/dev/null || echo missing)
+  state=$(svcs -H -o state "$fmri" 2>/dev/null | awk '{ print $1 }')
+  state=${state:-missing}
   case $state in
-    offline\*|missing)
+    offline|offline\*|*\*|missing)
       if (( waited >= max )); then
         exit 4
       fi

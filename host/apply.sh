@@ -8,7 +8,13 @@
 # that start-apply.sh saw, and after a step asked for a reboot also that
 # step's name. The method runs at every boot (SMF starts enabled transient
 # services); without the marker it exits at once, so only an apply that a
-# reboot interrupted resumes.
+# reboot interrupted resumes. The marker and apply.log live in the state
+# directory, a dataset outside the boot environment (see start-apply.sh);
+# the per-step logs stay under /var/log/homicron.
+#
+# Exit codes are SMF's: 95 (SMF_EXIT_ERR_FATAL) puts the service straight
+# into maintenance when a step fails, 96 (SMF_EXIT_ERR_CONFIG) when host.env
+# is missing. A plain 1 would make startd retry the method.
 #
 # Protocol lines in apply.log, read by bin/homicron:
 #   === run <time>[ (resumed after reboot)]
@@ -23,7 +29,9 @@ dir=${HOMICRON_DIR:-/opt/homicron}
 log_dir=${HOMICRON_LOG_DIR:-/var/log/homicron}
 state_dir=${HOMICRON_STATE_DIR:-/var/homicron}
 marker="$state_dir/apply-requested"
-log="$log_dir/apply.log"
+log="$state_dir/apply.log"
+smf_exit_err_fatal=95
+smf_exit_err_config=96
 
 say() {
   printf '%s\n' "$*" >> "$log"
@@ -35,11 +43,11 @@ boot_time() {
 
 [[ -e $marker ]] || exit 0
 
-mkdir -p "$log_dir"
+mkdir -p "$log_dir" "$state_dir"
 
 if [[ ! -r $dir/host.env ]]; then
   say "host.env missing in $dir; nothing run"
-  exit 1
+  exit "$smf_exit_err_config"
 fi
 
 set -o allexport
@@ -67,15 +75,18 @@ for path in "$dir"/[0-9][0-9]-*.sh; do
   if (( status == 10 )); then
     if [[ $rebooted_for == "$step" ]]; then
       say "step $step failed with status 10 (asked for a second reboot)"
-      exit 1
+      exit "$smf_exit_err_fatal"
     fi
     printf '%s %s\n' "$now_boot" "$step" > "$marker"
     say "rebooting for $step"
+    # watch-apply.sh polls once a second; let it read the line before the
+    # reboot kills it along with sshd.
+    sleep 3
     reboot
     exit 0
   elif (( status != 0 )); then
     say "step $step failed with status $status"
-    exit 1
+    exit "$smf_exit_err_fatal"
   fi
 done
 

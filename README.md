@@ -113,4 +113,4 @@ test/run-tests.sh   bats tests; target commands are faked on PATH
 
 CI runs both on every push and deploys the site from `main` with `pages/build-site.sh`.
 
-On the machine, `host/apply.sh` is the start method of `site/homicron-apply` and runs the steps; `host/start-apply.sh` imports `host/homicron-apply.xml` and starts a run; `host/watch-apply.sh` streams the log to the runner. The log is `/var/log/homicron/apply.log`, with one file per step beside it. Use `svcadm` and `svcs` on the service rather than running `apply.sh` by hand.
+On the machine, `host/apply.sh` is the start method of `site/homicron-apply` and runs the steps; `host/start-apply.sh` imports `host/homicron-apply.xml` and starts a run; `host/watch-apply.sh` streams the log to the runner. The log is `/var/homicron/apply.log`, on its own dataset `rpool/homicron` so it survives the boot environment switch of an OS update, with one file per step under `/var/log/homicron`. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) bounds how long one `apply` watches before telling you to rejoin. Use `svcadm` and `svcs` on the service rather than running `apply.sh` by hand.

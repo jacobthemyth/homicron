@@ -9,7 +9,18 @@ setup() {
   done
   make_fake svccfg
   make_fake svcadm
-  make_fake svcs 0 disabled
+  make_fake sleep
+  # svcs answers from $STATES: one state per line, consumed in order, the
+  # last line repeating. svcadm's effect is modeled by listing the state
+  # after it as a later line.
+  export STATES="$BATS_TEST_TMPDIR/states"
+  printf 'disabled\noffline*\n' > "$STATES"
+  make_fake svcs
+  printf 'n=$(grep -c "^svcs" "$FAKE_LOG"); total=$(wc -l < "$STATES"); (( n > total )) && n=$total; sed -n "${n}p" "$STATES"; exit 0\n' > "$FAKE_BIN/svcs.script"
+  # zfs: the dataset exists when $DATASETS lists it.
+  export DATASETS="$BATS_TEST_TMPDIR/datasets"; : > "$DATASETS"
+  make_fake zfs
+  printf 'case $1 in list) grep -qx "${*: -1}" "$DATASETS" ;; create) echo "${*: -1}" >> "$DATASETS" ;; esac\n' > "$FAKE_BIN/zfs.script"
   make_fake kstat 0 $'unix:0:system_misc:boot_time\t1000'
 }
 
@@ -43,7 +54,7 @@ setup() {
   for pair in 'maintenance:clear:cleared the failed run and started' 'online:restart:restarted'; do
     IFS=: read -r state verb line <<< "$pair"
     : > "$FAKE_LOG"
-    printf 'echo %s\n' "$state" > "$FAKE_BIN/svcs.script"
+    printf '%s\noffline*\n' "$state" > "$STATES"
     run "$HOMICRON_DIR/start-apply.sh"
     [ "$status" -eq 0 ]
     assert_called "^svcadm $verb site/homicron-apply$"
@@ -56,8 +67,43 @@ setup() {
   assert_called '^svcadm enable site/homicron-apply$'
 }
 
+@test "waits after svcadm until the state has moved before reporting" {
+  printf 'online\nonline\nonline\noffline*\n' > "$STATES"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "restarted" ]]
+  [ "$(fake_calls | grep -c '^sleep 0.25$')" -eq 2 ]
+  [ "$(fake_calls | grep -c '^svcs')" -eq 4 ]
+}
+
+@test "a state that never moves is still reported after the fence gives up" {
+  printf 'online\n' > "$STATES"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "restarted" ]]
+  [ "$(fake_calls | grep -c '^sleep 0.25$')" -eq 40 ]
+}
+
+@test "plain offline (waiting for dependencies) counts as a run in progress" {
+  printf 'offline\n' > "$STATES"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  refute_called '^svcadm'
+  [[ "$output" == "an apply is already running on the box" ]]
+}
+
+@test "creates the rpool/homicron dataset for the state directory once" {
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  assert_called "^zfs create -o mountpoint=$HOMICRON_STATE_DIR rpool/homicron$"
+  : > "$FAKE_LOG"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  refute_called '^zfs create'
+}
+
 @test "a running method is left alone" {
-  printf 'echo "offline*"\n' > "$FAKE_BIN/svcs.script"
+  printf 'offline*\n' > "$STATES"
   run "$HOMICRON_DIR/start-apply.sh"
   [ "$status" -eq 0 ]
   refute_called '^svcadm'
@@ -65,7 +111,7 @@ setup() {
 }
 
 @test "an unexpected state is reported and exits 1" {
-  printf 'echo degraded\n' > "$FAKE_BIN/svcs.script"
+  printf 'degraded\n' > "$STATES"
   run "$HOMICRON_DIR/start-apply.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *degraded* ]]

@@ -21,8 +21,8 @@ set -o errexit -o pipefail -o nounset
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 remote_dir=/opt/homicron
-remote_log_dir=/var/log/homicron
-remote_log=$remote_log_dir/apply.log
+remote_state_dir=/var/homicron
+remote_log=$remote_state_dir/apply.log
 service=site/homicron-apply
 # Every ssh and the rsync transport use these. Keepalives: a NAT or port
 # forward (qemu user networking, some firewalls) never closes the connection
@@ -265,24 +265,28 @@ run_header_offset() {
   printf '%s\n' "$(( ${n:-1} - 1 ))"
 }
 
-# The box announced a reboot and the ssh dropped. Wait until it is back with
-# a new boot time, or, when the boot time could not be read before, until
-# ssh works again.
-wait_for_reboot() {
-  local before="$1" after deadline
-  printf 'waiting for the box to come back\n'
+# The ssh carrying the stream dropped. Wait until the box answers again:
+# after an announced reboot that means a new boot time (or, when the boot
+# time could not be read before, ssh working again); after a plain drop the
+# first answer is enough. Past the deadline the apply is still running on
+# the box, so the message says how to rejoin.
+wait_for_box() {
+  local before="$1" rebooting="$2" name="$3" after deadline
+  if [[ $rebooting == yes ]]; then
+    printf 'waiting for the box to come back\n'
+  else
+    printf 'connection lost; waiting for the box\n'
+  fi
   deadline=$(( $(now) + reboot_timeout ))
   while true; do
     if (( $(now) >= deadline )); then
-      die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
+      die "cannot reach $HOMICRON_ADDR after ${reboot_timeout}s; the apply continues on the box, rejoin with homicron apply $name"
     fi
     sleep "$poll"
-    if [[ -z $before ]]; then
-      remote true >/dev/null 2>&1 && return 0
-    else
-      after=$(boot_time) || continue
-      [[ -n $after && $after != "$before" ]] && return 0
-    fi
+    remote true >/dev/null 2>&1 || continue
+    [[ $rebooting == yes && -n $before ]] || return 0
+    after=$(boot_time) || continue
+    [[ -n $after && $after != "$before" ]] && return 0
   done
 }
 
@@ -306,7 +310,7 @@ watch() {
 }
 
 apply() {
-  local name="$1" state stime tmp before out status
+  local name="$1" state stime tmp before out status rebooting
   load_host "$name"
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064  # expand now: the local is gone when the trap runs
@@ -346,8 +350,9 @@ apply() {
         die "a step failed; the log is $remote_log on the box" 1
         ;;
       255)
-        [[ $last_line == "rebooting for "* ]] || unreachable
-        wait_for_reboot "$before"
+        rebooting=no
+        [[ $last_line == "rebooting for "* ]] && rebooting=yes
+        wait_for_box "$before" "$rebooting" "$name"
         before=$(boot_time) || before=
         ;;
       4) die "apply still running after ${apply_timeout}s; rejoin with homicron apply $name" 1 ;;

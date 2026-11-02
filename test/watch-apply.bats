@@ -2,13 +2,13 @@ load helpers/fakes
 
 setup() {
   fakes_setup
-  export HOMICRON_LOG_DIR="$BATS_TEST_TMPDIR/log"
-  mkdir -p "$HOMICRON_LOG_DIR"
+  export HOMICRON_STATE_DIR="$BATS_TEST_TMPDIR/state"
+  mkdir -p "$HOMICRON_STATE_DIR"
   WATCH="$BATS_TEST_TMPDIR/watch-apply.sh"
   if [[ -f "$BATS_TEST_DIRNAME/../host/watch-apply.sh" ]]; then cp "$BATS_TEST_DIRNAME/../host/watch-apply.sh" "$WATCH"; fi
   make_fake sleep
   make_fake svcs 0 online
-  export LOG="$HOMICRON_LOG_DIR/apply.log"
+  export LOG="$HOMICRON_STATE_DIR/apply.log"
   printf 'one\ntwo\nthree\n' > "$LOG"
 }
 
@@ -56,4 +56,20 @@ setup() {
   run "$WATCH" 3 2
   [ "$status" -eq 4 ]
   [ "$(fake_calls | grep -c '^sleep 1$')" -eq 2 ]
+}
+
+@test "plain offline (dependencies pending) and transitional states keep polling" {
+  printf 'n=$(grep -c "^svcs" "$FAKE_LOG"); case $n in 1) echo offline;; 2) echo "online*";; 3) echo "maintenance*";; *) echo online;; esac; exit 0\n' > "$FAKE_BIN/svcs.script"
+  run "$WATCH" 3 60
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(fake_calls | grep -c '^sleep 1$')" -eq 3 ]
+}
+
+@test "a partial last line is not printed until it is complete, and never twice" {
+  printf 'one\ntwo\nthree\nfo' > "$LOG"
+  printf 'n=$(grep -c "^svcs" "$FAKE_LOG"); if (( n == 1 )); then printf "ur\\n" >> "$LOG"; echo "offline*"; else echo online; fi; exit 0\n' > "$FAKE_BIN/svcs.script"
+  run "$WATCH" 1 60
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'two\nthree\nfour' ]]
 }

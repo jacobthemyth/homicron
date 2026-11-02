@@ -10,8 +10,9 @@ setup() {
   printf '#!/bin/bash\necho b; exit 0\n' > "$HOMICRON_DIR/20-b.sh"
   make_fake kstat 0 $'unix:0:system_misc:boot_time\t1000'
   make_fake reboot
+  make_fake sleep
   printf '1000\n' > "$HOMICRON_STATE_DIR/apply-requested"
-  LOG="$HOMICRON_LOG_DIR/apply.log"
+  LOG="$HOMICRON_STATE_DIR/apply.log"
 }
 
 @test "no marker: exits 0 and runs nothing" {
@@ -34,10 +35,10 @@ setup() {
   [ ! -e "$HOMICRON_STATE_DIR/apply-requested" ]
 }
 
-@test "a failing step logs the status, exits 1, keeps the marker, runs no later step" {
+@test "a failing step logs the status, exits 95 (SMF fatal), keeps the marker, runs no later step" {
   printf '#!/bin/bash\nexit 3\n' > "$HOMICRON_DIR/10-a.sh"
   run "$HOMICRON_DIR/apply.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 95 ]
   [[ "$(tail -1 "$LOG")" == "step 10-a.sh failed with status 3" ]]
   ! grep -q '^==> 20-b.sh' "$LOG"
   [ -e "$HOMICRON_STATE_DIR/apply-requested" ]
@@ -48,6 +49,8 @@ setup() {
   run "$HOMICRON_DIR/apply.sh"
   [[ "$(tail -1 "$LOG")" == "rebooting for 10-a.sh" ]]
   [ "$(fake_calls | grep -Ec '^reboot ?$')" -eq 1 ]
+  # the watcher polls once a second; give it time to read the announcement
+  [[ "$(fake_calls | grep -E '^(sleep|reboot)' | tr '\n' ' ')" == "sleep 3 reboot  " ]]
   [[ "$(cat "$HOMICRON_STATE_DIR/apply-requested")" == "1000 10-a.sh" ]]
   ! grep -q '^==> 20-b.sh' "$LOG"
 }
@@ -63,14 +66,14 @@ setup() {
   printf '900 10-a.sh\n' > "$HOMICRON_STATE_DIR/apply-requested"
   printf '#!/bin/bash\nexit 10\n' > "$HOMICRON_DIR/10-a.sh"
   run "$HOMICRON_DIR/apply.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 95 ]
   refute_called '^reboot ?$'
   [[ "$(tail -1 "$LOG")" == "step 10-a.sh failed with status 10 (asked for a second reboot)" ]]
 }
 
-@test "a missing host.env logs and exits 1" {
+@test "a missing host.env logs and exits 96 (SMF config error)" {
   rm "$HOMICRON_DIR/host.env"
   run "$HOMICRON_DIR/apply.sh"
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 96 ]
   grep -q 'host.env' "$LOG"
 }

@@ -152,8 +152,6 @@ EOS
   printf 'x\nrebooting for 30-pkg.sh\n' > "$STREAM.1"; printf '255\n' > "$WATCH_EXIT.1"
   printf 'apply complete\n' > "$STREAM.2"; printf '0\n' > "$WATCH_EXIT.2"
   # the boot time changes after the first kstat read
-  cat >> "$FAKE_BIN/ssh.script" <<'EOS'
-EOS
   printf 'n=$(grep -c kstat "$FAKE_LOG"); if (( n <= 1 )); then echo 1000; else echo 1001; fi > "$BATS_TEST_TMPDIR/boot"\n' > "$FAKE_BIN/boot.sh"
   sed -i '' 's|\*kstat\*) |*kstat*) bash "$FAKE_BIN/boot.sh"; |' "$FAKE_BIN/ssh.script"
   run "$REPO/bin/homicron" apply box
@@ -182,18 +180,30 @@ EOS
   printf 'rebooting for 30-pkg.sh\n' > "$STREAM"; printf '255\n' > "$WATCH_EXIT"
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot reach box.local after reboot (30s)"* ]]
+  [[ "$output" == *"cannot reach box.local after 30s; the apply continues on the box, rejoin with homicron apply box"* ]]
   # 30 s of timeout at 5 s a poll: six waits, then the deadline
   [ "$(fake_calls | grep -c '^sleep 5$')" -eq 6 ]
 }
 
-@test "255 without a reboot line is unreachable" {
+@test "255 without a reboot line waits for the box and reconnects at the offset" {
+  box_fake
+  printf 'x\ny\n' > "$STREAM.1"; printf '255\n' > "$WATCH_EXIT.1"
+  printf 'apply complete\n' > "$STREAM.2"; printf '0\n' > "$WATCH_EXIT.2"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"connection lost; waiting for the box"* ]]
+  assert_called 'watch-apply.sh 2 7200$'
+  [[ "${lines[-1]}" == "apply complete" ]]
+}
+
+@test "a box that never answers after a dropped connection is reported with the rejoin command" {
   box_fake
   printf 'x\n' > "$STREAM"; printf '255\n' > "$WATCH_EXIT"
+  sed -i '' 's|\*) exit 0 ;;|*root@box.local\\ true) exit 255 ;;\n  *) exit 0 ;;|' "$FAKE_BIN/ssh.script"
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot reach box.local"* ]]
-  [[ "$output" == *"host key"* ]]
+  [[ "$output" == *"cannot reach box.local after 30s; the apply continues on the box, rejoin with homicron apply box"* ]]
+  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 6 ]
 }
 
 @test "an unreachable box is reported at the first ssh, before rsync" {
@@ -247,7 +257,7 @@ EOS
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
   [[ "$output" == *"service is disabled"* ]]
-  [[ "$output" == *"/var/log/homicron/apply.log"* ]]
+  [[ "$output" == *"/var/homicron/apply.log"* ]]
 }
 
 @test "start-apply failing stops with its output" {
