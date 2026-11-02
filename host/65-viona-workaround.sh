@@ -10,7 +10,9 @@
 #   https://github.com/oxidecomputer/falcon/issues/383
 #
 # End state: /etc/system carries the mask line, so it survives a reboot, and
-# the running kernel already has the mask, so no reboot is needed now.
+# the running kernel already has the mask when the viona module is loaded, so
+# no reboot is needed now. While the module is not loaded (no VM has run since
+# boot) the line alone is the end state: the kernel applies it at module load.
 #
 # The workaround was validated with voxel at $validated_commit. When the
 # checkout is at any other commit the step logs a warning: once voxel pins a
@@ -26,7 +28,7 @@ system_file="$etc/system"
 src="$home_root/$HOMICRON_USER/src/voxel"
 line='set viona:viona_feat_disable_mask=0x20000000'
 mask=20000000
-validated_commit=77901ac4bb2d6e1ac6dd7380b3758129b73f69cd
+validated_commit=a6ad27b230e2541bd7ca2f12ee7c08dd7a3d2174
 issue=https://github.com/oxidecomputer/falcon/issues/383
 
 file_has_line() {
@@ -39,8 +41,12 @@ live_mask() {
   echo 'viona_feat_disable_mask/X' | mdb -k 2>/dev/null | awk 'END { print $2 }'
 }
 
+viona_loaded() {
+  modinfo 2>/dev/null | grep -q '[[:space:]]viona[[:space:]]'
+}
+
 live_ok() {
-  [[ $(live_mask) == "$mask" ]]
+  ! viona_loaded || [[ $(live_mask) == "$mask" ]]
 }
 
 check() {

@@ -2,7 +2,7 @@ load helpers/fakes
 
 STEP="$BATS_TEST_DIRNAME/../host/65-viona-workaround.sh"
 LINE='set viona:viona_feat_disable_mask=0x20000000'
-VALIDATED=77901ac4bb2d6e1ac6dd7380b3758129b73f69cd
+VALIDATED=a6ad27b230e2541bd7ca2f12ee7c08dd7a3d2174
 
 setup() {
   fakes_setup
@@ -16,9 +16,13 @@ setup() {
   make_fake mdb
   cat > "$FAKE_BIN/mdb.script" <<'EOS'
 in=$(cat)
+if [[ ! -f $MASK_FILE ]]; then echo "mdb: failed to dereference symbol: unknown symbol name" >&2; exit 1; fi
 if [[ $* == *-kw* ]]; then v=${in##*/Z }; printf '%s\n' "${v#0x}" > "$MASK_FILE"; exit 0; fi
 printf 'viona_feat_disable_mask:\nviona_feat_disable_mask:        %s\n' "$(cat "$MASK_FILE")"
 EOS
+  # modinfo lists viona only while the module is loaded; the mask file stands in for that.
+  make_fake modinfo
+  printf '[[ -f $MASK_FILE ]] && echo "184 fffffffff4184000 97e8 289 1 viona (Virtio Network Accelerator)"; exit 0\n' > "$FAKE_BIN/modinfo.script"
   # The fake su answers git rev-parse with the commit in $HEAD_FILE.
   export HEAD_FILE="$BATS_TEST_TMPDIR/head"
   printf '%s\n' "$VALIDATED" > "$HEAD_FILE"
@@ -81,4 +85,13 @@ EOS
   [ "$status" -eq 0 ]
   grep -qx 'set zfs:zfs_arc_max=0x100000000' "$HOMICRON_ETC/system"
   grep -qxF "$LINE" "$HOMICRON_ETC/system"
+}
+
+@test "an unloaded viona module is a satisfied live state: the /etc/system line applies at load" {
+  rm -f "$MASK_FILE"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  grep -qxF "$LINE" "$HOMICRON_ETC/system"
+  refute_called '^mdb'
+  [[ "$output" != *"end state not reached"* ]]
 }
