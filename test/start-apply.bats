@@ -67,6 +67,17 @@ setup() {
   assert_called '^svcadm enable site/homicron-apply$'
 }
 
+@test "a transient star after the import is not a running method: online* then online restarts" {
+  # svccfg import leaves an online instance in online* for a moment while
+  # startd rereads its configuration. The star must settle before the state
+  # is read, or every apply on a converged box would attach to nothing.
+  printf 'online*\nonline*\nonline\noffline*\n' > "$STATES"
+  run "$HOMICRON_DIR/start-apply.sh"
+  [ "$status" -eq 0 ]
+  assert_called '^svcadm restart site/homicron-apply$'
+  [[ "$output" == "restarted" ]]
+}
+
 @test "waits after svcadm until the state has moved before reporting" {
   printf 'online\nonline\nonline\noffline*\n' > "$STATES"
   run "$HOMICRON_DIR/start-apply.sh"

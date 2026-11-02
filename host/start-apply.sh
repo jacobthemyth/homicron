@@ -75,7 +75,23 @@ start_with() {
   fi
 }
 
-current=$(state)
+# svccfg import leaves the instance in a starred state (online*) for a
+# moment while startd rereads its configuration. A star that settles within
+# a few seconds is that refresh; one that stays is a running method.
+settle() {
+  local i s
+  for (( i = 0; i < 20; i++ )); do
+    s=$(state)
+    if [[ $s != *\* ]]; then
+      printf '%s\n' "$s"
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%s\n' "$s"
+}
+
+current=$(settle)
 case $current in
   offline|offline\*|*\*)
     # A run is pending or in progress. The marker makes a pending boot-time
