@@ -21,7 +21,7 @@ source "$(dirname "$0")/lib.sh"
 home_root=${HOMICRON_HOME:-/home}
 src="$home_root/$HOMICRON_USER/src/voxel"
 voxel="$src/target/release/voxel"
-dir=${HOMICRON_PROPOLIS_DIR:-/var/homicron/propolis}
+dir=${HOMICRON_PROPOLIS_DIR:-${HOMICRON_STATE_DIR:-/var/homicron}/propolis}
 base=https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/falcon
 curl_opts=(-fsSL --retry 5 --retry-all-errors)
 

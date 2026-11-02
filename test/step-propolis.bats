@@ -75,8 +75,8 @@ EOS
 @test "the default directory is outside /opt/homicron, which the runner's rsync --delete owns" {
   default=$(sed -n 's/^dir=\${HOMICRON_PROPOLIS_DIR:-\(.*\)}$/\1/p' "$STEP")
   [ -n "$default" ]
-  [[ $default != /opt/homicron* ]]
-  [[ $default == /var/homicron/propolis ]]
+  [[ $default != *opt/homicron* ]]
+  [[ $default == '${HOMICRON_STATE_DIR:-/var/homicron}/propolis' ]]
 }
 
 @test "a Cargo.toml without the rev exits 1" {
@@ -85,4 +85,13 @@ EOS
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot read the propolis rev from voxel's Cargo.toml"* ]]
   refute_called '^curl'
+}
+
+@test "without HOMICRON_PROPOLIS_DIR the binary lands under the state directory" {
+  unset HOMICRON_PROPOLIS_DIR
+  export HOMICRON_STATE_DIR="$BATS_TEST_TMPDIR/state"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  [ -x "$HOMICRON_STATE_DIR/propolis/$REV" ]
+  assert_called "^voxel config set falcon.propolis_binary $HOMICRON_STATE_DIR/propolis/$REV$"
 }

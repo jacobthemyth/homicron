@@ -126,7 +126,10 @@ Values follow the existing rule: letters, digits, and `. _ / : @ % + , -`.
 
 An empty `MGMT_LINKS` leaves dhcpagent alone. The step never removes a
 line, so a link taken out of `MGMT_LINKS` keeps its rule until a person
-removes it; the README says so.
+removes it; the README says so. A line that names option 3 among other
+options counts as present. When the line is present but the link still
+holds a default route (a lease older than the line, or a hand-written
+line), the step names the link and the gateway and recycles the lease.
 
 ## Step 85: voxel.toml keys
 
@@ -161,7 +164,8 @@ mode`.
 ## Step 87: the propolis binary
 
 `host/87-propolis.sh` follows the voxel checkout, whose `Cargo.toml` names
-the rev. End state: `/var/homicron/propolis/<rev>`
+the rev. End state: `/var/homicron/propolis/<rev>` (the state directory,
+`HOMICRON_STATE_DIR`, plus `propolis`)
 exists with mode 0755 and the digest buildomat publishes for that rev, and
 `falcon.propolis_binary` in voxel.toml names it.
 
@@ -200,7 +204,10 @@ the manifest points.
 
 - `check`: the installed manifest `cmp`s the shipped one; `svcs -H -o
   state site/voxel-rack` prints a state; enabled (`online`, `offline`,
-  `offline*`) matches `VOXEL_RACK`.
+  `offline*`) matches `VOXEL_RACK`; `/etc/logadm.conf` holds a
+  `voxel-rack` entry (`logadm -w voxel-rack -C 8 -s 10m -z 1
+  /var/log/voxel-rack.log`), written once by `apply`, so the rack log
+  rotates.
 - `apply`: when the manifest differs or is missing, `svccfg validate`
   (print its output and exit 1 on failure), copy, `svccfg import` (an
   idempotent upgrade as the apply spec describes). Then, when the enabled

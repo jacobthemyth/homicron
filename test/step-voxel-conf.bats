@@ -100,7 +100,7 @@ converged() {
   printf 'rpool/falcon/img/voxel-cp-abc\nrpool/falcon/img/voxel-cp-def\n' > "$IMAGES"
   run "$STEP"
   [ "$status" -eq 1 ]
-  [[ "$output" == *voxel-cp-abc* && "$output" == *voxel-cp-def* ]]
+  [[ "$output" == *"more than one voxel-cp image under rpool/falcon/img: voxel-cp-abc voxel-cp-def; set VOXEL_CP_IMAGE"* ]]
   refute_called 'config set image.cp'
 }
 

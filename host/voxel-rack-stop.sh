@@ -20,6 +20,7 @@ set -o allexport
 # shellcheck disable=SC1091
 source "$dir/host.env"
 set +o allexport
+[[ -n ${HOMICRON_USER:-} ]] || exit 0
 
 voxel="$home_root/$HOMICRON_USER/src/voxel/target/release/voxel"
 config="$home_root/$HOMICRON_USER/.config/voxel"

@@ -38,6 +38,11 @@ set -o allexport
 source "$dir/host.env"
 set +o allexport
 
+if [[ -z ${HOMICRON_USER:-} ]]; then
+  say "HOMICRON_USER missing in $dir/host.env; no launch"
+  exit "$smf_exit_err_config"
+fi
+
 voxel="$home_root/$HOMICRON_USER/src/voxel/target/release/voxel"
 config="$home_root/$HOMICRON_USER/.config/voxel"
 

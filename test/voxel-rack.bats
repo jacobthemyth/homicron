@@ -119,3 +119,11 @@ EOS
   [ "$status" -eq 0 ]
   assert_called '^su - vmuser -c pfexec .*voxel destroy$'
 }
+
+@test "start: a host.env without HOMICRON_USER exits 96 and runs nothing" {
+  : > "$HOMICRON_DIR/host.env"
+  run "$HOST/voxel-rack-start.sh"
+  [ "$status" -eq 96 ]
+  refute_called '^su'
+  grep -q 'HOMICRON_USER missing' "$HOMICRON_RACK_LOG"
+}

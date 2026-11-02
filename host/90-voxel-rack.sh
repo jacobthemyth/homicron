@@ -46,12 +46,24 @@ manifest_installed() {
   [[ -f $installed ]] && cmp -s "$manifest" "$installed"
 }
 
+# The rack log gets every launch's RSS progress, so logadm rotates it: keep
+# 8 compressed copies, roll at 10 MB. One entry, written once.
+logadm_conf=${HOMICRON_LOGADM_CONF:-/etc/logadm.conf}
+rack_log=/var/log/voxel-rack.log
+
+log_rotated() {
+  grep -q "^voxel-rack " "$logadm_conf" 2>/dev/null
+}
+
 check() {
-  manifest_installed && [[ $(state) != missing ]] && [[ $(enabled) == "$want" ]]
+  manifest_installed && log_rotated && [[ $(state) != missing ]] && [[ $(enabled) == "$want" ]]
 }
 
 apply() {
   local out
+  if ! log_rotated; then
+    logadm -w voxel-rack -C 8 -s 10m -z 1 "$rack_log"
+  fi
   if ! manifest_installed; then
     if ! out=$(svccfg validate "$manifest" 2>&1); then
       log "svccfg validate $manifest failed:"

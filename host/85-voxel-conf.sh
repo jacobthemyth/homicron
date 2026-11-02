@@ -31,7 +31,7 @@ cp_image() {
     log "no voxel-cp image under $dataset/img; step 80 builds one" >&2
     exit 1
   elif (( count > 1 )); then
-    log "more than one voxel-cp image under $dataset/img: $(printf '%s' "$names" | tr '\n' ' ')set VOXEL_CP_IMAGE" >&2
+    log "more than one voxel-cp image under $dataset/img: $(printf '%s\n' "$names" | paste -sd' ' -); set VOXEL_CP_IMAGE" >&2
     exit 1
   fi
   printf '%s\n' "$names"

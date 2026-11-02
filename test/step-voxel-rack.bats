@@ -18,6 +18,11 @@ setup() {
   printf 'cat "$STATES"\n' > "$FAKE_BIN/svcs.script"
   printf 'case $1 in enable|clear) echo online > "$STATES" ;; disable) echo disabled > "$STATES" ;; esac\n' > "$FAKE_BIN/svcadm.script"
   make_fake sleep
+  # The logadm entry is present in the converged fixture; one test empties it.
+  export HOMICRON_LOGADM_CONF="$BATS_TEST_TMPDIR/logadm.conf"
+  echo 'voxel-rack -C 8 -s 10m -z 1 /var/log/voxel-rack.log' > "$HOMICRON_LOGADM_CONF"
+  make_fake logadm
+  printf 'echo "voxel-rack -C 8 -s 10m -z 1 /var/log/voxel-rack.log" >> "$HOMICRON_LOGADM_CONF"\n' > "$FAKE_BIN/logadm.script"
 }
 
 @test "a service in maintenance is cleared, not enabled again" {
@@ -112,4 +117,20 @@ setup() {
   assert_called '^svccfg import'
   cmp -s "$HOMICRON_DIR/voxel-rack.xml" "$HOMICRON_MANIFEST_DIR/voxel-rack.xml"
   refute_called '^svcadm'
+}
+
+@test "adds a logadm entry for the rack log once" {
+  export HOMICRON_LOGADM_CONF="$BATS_TEST_TMPDIR/logadm.conf"
+  : > "$HOMICRON_LOGADM_CONF"
+  make_fake logadm
+  printf 'echo "voxel-rack -C 8 -s 10m -z 1 /var/log/voxel-rack.log" >> "$HOMICRON_LOGADM_CONF"\n' > "$FAKE_BIN/logadm.script"
+  cp "$HOMICRON_DIR/voxel-rack.xml" "$HOMICRON_MANIFEST_DIR/"
+  echo online > "$STATES"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  assert_called '^logadm -w voxel-rack -C 8 -s 10m -z 1 /var/log/voxel-rack.log$'
+  : > "$FAKE_LOG"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  refute_called '^logadm'
 }
