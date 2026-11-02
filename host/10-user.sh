@@ -5,8 +5,10 @@
 # End state: $HOMICRON_USER exists with uid $HOMICRON_UID and home on
 # rpool/home/$HOMICRON_USER, holds the Primary Administrator profile and the
 # net_icmpaccess privilege, has the repository's authorized_keys, root has
-# the same authorized_keys (the runner logs in as root), and
-# /etc/default/login puts /opt/ooce on the PATH.
+# the same authorized_keys (the runner logs in as root), /etc/default/login
+# puts /opt/ooce on the PATH, and /etc/default/su gives shells started with
+# `su -` (as_user in lib.sh) the same PATH; su does not read login's, and
+# its built-in default is a bare /usr/bin: with the current directory on it.
 #
 set -o errexit -o pipefail -o nounset
 # shellcheck disable=SC1091
@@ -21,7 +23,28 @@ real_home="/home/$user"
 dataset="rpool/home/$user"
 keys_src="$HOMICRON_DIR/authorized_keys"
 login_defaults="$etc/default/login"
+su_defaults="$etc/default/su"
 ooce_path='/opt/ooce/bin:/opt/ooce/sbin'
+
+# The value of the active PATH= line in a defaults file, or nothing.
+path_value() {
+  sed -n 's/^PATH=//p' "$1" | tail -1
+}
+
+# Make the active PATH= line in a defaults file read exactly $2. Three
+# shapes of file: an active PATH= line (replace it), only the stock commented
+# #PATH= line (uncomment and replace), or neither (add one).
+set_path() {
+  local file=$1 value=$2
+  if grep -q '^PATH=' "$file"; then
+    awk -v v="$value" '/^PATH=/ { $0 = "PATH=" v } { print }' "$file" > "$file.homicron"
+  elif grep -q '^#PATH=' "$file"; then
+    awk -v v="$value" '/^#PATH=/ && !done { $0 = "PATH=" v; done = 1 } { print }' "$file" > "$file.homicron"
+  else
+    { cat "$file"; printf 'PATH=%s\n' "$value"; } > "$file.homicron"
+  fi
+  mv "$file.homicron" "$file"
+}
 
 user_exists() {
   local line
@@ -59,8 +82,12 @@ path_has_ooce() {
   grep -q "^PATH=.*/opt/ooce/bin" "$login_defaults"
 }
 
+su_path_matches_login() {
+  [[ -n $(path_value "$login_defaults") && $(path_value "$su_defaults") == "$(path_value "$login_defaults")" ]]
+}
+
 check() {
-  user_exists && dataset_exists && has_profile && has_icmp_priv && keys_match && root_keys_match && path_has_ooce
+  user_exists && dataset_exists && has_profile && has_icmp_priv && keys_match && root_keys_match && path_has_ooce && su_path_matches_login
 }
 
 apply() {
@@ -104,16 +131,18 @@ apply() {
 
   if ! path_has_ooce; then
     log "adding $ooce_path to PATH in $login_defaults"
-    # Three shapes of file: an active PATH= line (append to it), only the
-    # stock commented #PATH= line (uncomment and append), or neither (add one).
-    if grep -q '^PATH=' "$login_defaults"; then
-      awk -v extra="$ooce_path" '/^PATH=/ { $0 = $0 ":" extra } { print }' "$login_defaults" > "$login_defaults.homicron"
-    elif grep -q '^#PATH=' "$login_defaults"; then
-      awk -v extra="$ooce_path" '/^#PATH=/ && !done { sub(/^#/, ""); $0 = $0 extra; done = 1 } { print }' "$login_defaults" > "$login_defaults.homicron"
-    else
-      { cat "$login_defaults"; printf 'PATH=/usr/bin:/usr/sbin:%s\n' "$ooce_path"; } > "$login_defaults.homicron"
-    fi
-    mv "$login_defaults.homicron" "$login_defaults"
+    # Start from the active line, else the stock commented one, else a
+    # default. A trailing colon means the current directory; drop it.
+    local base
+    base=$(path_value "$login_defaults")
+    [[ -n $base ]] || base=$(sed -n 's/^#PATH=//p' "$login_defaults" | head -1)
+    [[ -n $base ]] || base=/usr/bin:/usr/sbin
+    set_path "$login_defaults" "${base%:}:$ooce_path"
+  fi
+
+  if ! su_path_matches_login; then
+    log "setting PATH in $su_defaults to match $login_defaults"
+    set_path "$su_defaults" "$(path_value "$login_defaults")"
   fi
 }
 

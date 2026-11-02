@@ -10,6 +10,7 @@ setup() {
   mkdir -p "$HOMICRON_DIR" "$HOMICRON_ETC/default" "$HOMICRON_HOME" "$HOMICRON_ROOT_HOME"
   echo 'ssh-ed25519 AAAA test' > "$HOMICRON_DIR/authorized_keys"
   printf 'PATH=/usr/bin:/usr/sbin\n' > "$HOMICRON_ETC/default/login"
+  printf '#PATH=/usr/bin:\n#SUPATH=/usr/sbin:/usr/bin\n' > "$HOMICRON_ETC/default/su"
   for c in zfs useradd usermod passwd profiles userattr getent chown chmod; do make_fake "$c"; done
 }
 
@@ -21,6 +22,7 @@ setup() {
   cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_HOME/vmuser/.ssh/"
   cp "$HOMICRON_DIR/authorized_keys" "$HOMICRON_ROOT_HOME/.ssh/"
   printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
+  printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/su"
   run "$STEP"
   [ "$status" -eq 0 ]
   refute_called '^useradd'
@@ -94,4 +96,51 @@ setup() {
   [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/login")" -eq 1 ]
   grep -q '^PATH=/usr/bin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/login"
   grep -q '^#SUPATH=' "$HOMICRON_ETC/default/login"
+}
+
+# su - takes the new shell's PATH from /etc/default/su, not /etc/default/login;
+# the stock default is a bare /usr/bin: (with the current directory on it).
+
+@test "uncomments the stock PATH line in /etc/default/su with the login PATH" {
+  make_fake getent 2
+  run "$STEP"
+  [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/su")" -eq 1 ]
+  grep -q '^PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/su"
+  grep -q '^#SUPATH=/usr/sbin:/usr/bin$' "$HOMICRON_ETC/default/su"
+}
+
+@test "replaces an active PATH line in /etc/default/su that differs from login" {
+  printf 'SULOG=/var/adm/sulog\nPATH=/usr/bin:\n' > "$HOMICRON_ETC/default/su"
+  make_fake getent 2
+  run "$STEP"
+  [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/su")" -eq 1 ]
+  grep -q '^SULOG=/var/adm/sulog$' "$HOMICRON_ETC/default/su"
+  grep -q '^PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/su"
+}
+
+@test "appends a PATH line to /etc/default/su that has none" {
+  printf 'SYSLOG=YES\n' > "$HOMICRON_ETC/default/su"
+  make_fake getent 2
+  run "$STEP"
+  [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/su")" -eq 1 ]
+  grep -q '^SYSLOG=YES$' "$HOMICRON_ETC/default/su"
+  grep -q '^PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/su"
+}
+
+@test "a su PATH that already matches login is left alone" {
+  printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
+  printf '# keep me\nPATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/su"
+  make_fake getent 2
+  run "$STEP"
+  [[ $output != *default/su* ]]
+  grep -q '^# keep me$' "$HOMICRON_ETC/default/su"
+  [ "$(grep -c '^PATH=' "$HOMICRON_ETC/default/su")" -eq 1 ]
+}
+
+@test "a changed login PATH propagates to su on the next run" {
+  printf 'PATH=/usr/bin:/usr/sbin:/usr/gnu/bin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/login"
+  printf 'PATH=/usr/bin:/usr/sbin:/opt/ooce/bin:/opt/ooce/sbin\n' > "$HOMICRON_ETC/default/su"
+  make_fake getent 2
+  run "$STEP"
+  grep -q '^PATH=/usr/bin:/usr/sbin:/usr/gnu/bin:/opt/ooce/bin:/opt/ooce/sbin$' "$HOMICRON_ETC/default/su"
 }
