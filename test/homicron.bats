@@ -29,6 +29,32 @@ setup() {
   unset HOMICRON_ADDR
 }
 
+# A fake box behind ssh: the service state from $STATE ("<state> <stime>"),
+# the apply.log line count from $LOG_LINES, the last run header line number
+# from $HEADER_LINE, start-apply.sh's line from $START, and watch-apply.sh's
+# stream and exit status from $STREAM and $WATCH_EXIT. The Nth watch call
+# prefers $STREAM.N and $WATCH_EXIT.N when they exist.
+box_fake() {
+  export STATE="$BATS_TEST_TMPDIR/state" LOG_LINES="$BATS_TEST_TMPDIR/loglines" HEADER_LINE="$BATS_TEST_TMPDIR/header"
+  export START="$BATS_TEST_TMPDIR/start" STREAM="$BATS_TEST_TMPDIR/stream" WATCH_EXIT="$BATS_TEST_TMPDIR/watchexit"
+  printf 'disabled -\n' > "$STATE"; printf '0\n' > "$LOG_LINES"; : > "$HEADER_LINE"
+  printf 'enabled and started\n' > "$START"; : > "$STREAM"; printf '0\n' > "$WATCH_EXIT"
+  cat > "$FAKE_BIN/ssh.script" <<'EOS'
+case "$*" in
+  *svcs*) cat "$STATE"; exit 0 ;;
+  *"wc -l"*) cat "$LOG_LINES"; exit 0 ;;
+  *grep*) cat "$HEADER_LINE"; exit 0 ;;
+  *start-apply.sh*) cat "$START"; exit 0 ;;
+  *watch-apply.sh*)
+    n=$(grep -c 'watch-apply.sh' "$FAKE_LOG")
+    if [[ -f $STREAM.$n ]]; then cat "$STREAM.$n"; else cat "$STREAM"; fi
+    if [[ -f $WATCH_EXIT.$n ]]; then exit "$(cat "$WATCH_EXIT.$n")"; else exit "$(cat "$WATCH_EXIT")"; fi ;;
+  *kstat*) printf 'unix:0:system_misc:boot_time\t%s\n' "$(cat "$BATS_TEST_TMPDIR/boot" 2>/dev/null || echo 1000)"; exit 0 ;;
+  *) exit 0 ;;
+esac
+EOS
+}
+
 # A fake rsync that keeps a copy of the shipped host.env and authorized_keys.
 capture_sent() {
   cat > "$FAKE_BIN/rsync.script" <<'EOS'
@@ -77,96 +103,6 @@ EOS
   refute_called 'box\.local'
 }
 
-@test "runs steps in order over ssh with the port" {
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 0 ]
-  assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 10-a.sh$'
-  assert_called '^ssh -p 2222 .*root@box.local /opt/homicron/run-step.sh 20-b.sh$'
-  [[ "$(fake_calls | grep run-step | head -1)" == *10-a.sh ]]
-  [[ "${lines[-3]}" == "apply complete" ]]
-  [[ "${lines[-1]}" == '  pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto' ]]
-}
-
-@test "exit 10 reboots, waits, reruns the step, then continues" {
-  cat > "$FAKE_BIN/ssh.script" <<'EOS'
-case "$*" in
-  *kstat*) n=$(grep -c 'reboot$' "$FAKE_LOG"); printf 'unix:0:system_misc:boot_time\t%s\n' "$((1000 + n))"; exit 0 ;;
-  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
-  *) exit 0 ;;
-esac
-EOS
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 0 ]
-  assert_called 'root@box.local reboot$'
-  assert_called '^ssh .*-o ServerAliveInterval=[0-9]+ .*root@box.local reboot$'
-  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
-  assert_called '20-b.sh$'
-}
-
-@test "an unchanged boot time means the reboot was lost; it is sent again" {
-  cat > "$FAKE_BIN/ssh.script" <<'EOS'
-case "$*" in
-  *kstat*) n=$(grep -c 'kstat' "$FAKE_LOG"); if (( n <= 3 )); then t=1000; else t=1001; fi; printf 'unix:0:system_misc:boot_time\t%s\n' "$t"; exit 0 ;;
-  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
-  *) exit 0 ;;
-esac
-EOS
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 0 ]
-  [ "$(fake_calls | grep -c 'reboot$')" -eq 2 ]
-  [[ "$output" == *"has not rebooted yet"* ]]
-  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
-  # polls at 5, 10 (resend), 15: three waits of the poll interval
-  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 3 ]
-}
-
-@test "within the grace period an unchanged boot time does not resend reboot" {
-  cat > "$FAKE_BIN/ssh.script" <<'EOS'
-case "$*" in
-  *kstat*) printf 'unix:0:system_misc:boot_time\t1000\n'; exit 0 ;;
-  *10-a.sh) exit 10 ;;
-  *) exit 0 ;;
-esac
-EOS
-  HOMICRON_REBOOT_GRACE=60 run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot reach box.local after reboot (30s)"* ]]
-  [ "$(fake_calls | grep -c 'reboot$')" -eq 1 ]
-  # 30 s of timeout at 5 s a poll: six waits, then the deadline
-  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 6 ]
-}
-
-@test "a failing kstat still reboots, waits for ssh to drop and return, and reruns the step" {
-  cat > "$FAKE_BIN/ssh.script" <<'EOS'
-case "$*" in
-  *kstat*) exit 1 ;;
-  *root@box.local\ true) n=$(grep -c 'true$' "$FAKE_LOG"); if (( n <= 2 )); then exit 255; else exit 0; fi ;;
-  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
-  *) exit 0 ;;
-esac
-EOS
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 0 ]
-  assert_called 'root@box.local reboot$'
-  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
-}
-
-@test "without kstat, ssh that never drops means the reboot was lost; it is sent again" {
-  cat > "$FAKE_BIN/ssh.script" <<'EOS'
-case "$*" in
-  *kstat*) exit 1 ;;
-  *root@box.local\ true) n=$(grep -c 'reboot$' "$FAKE_LOG"); t=$(grep -c 'true$' "$FAKE_LOG"); if (( n >= 2 && t <= 3 )); then exit 255; else exit 0; fi ;;
-  *10-a.sh) n=$(grep -c '10-a.sh$' "$FAKE_LOG"); if [[ $n -eq 1 ]]; then exit 10; else exit 0; fi ;;
-  *) exit 0 ;;
-esac
-EOS
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 0 ]
-  [ "$(fake_calls | grep -c 'reboot$')" -eq 2 ]
-  [[ "$output" == *"has not rebooted yet"* ]]
-  [ "$(fake_calls | grep -c '10-a.sh$')" -eq 2 ]
-}
-
 @test "an unknown variable in the hosts file exits 2 with the line number before rsync" {
   printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\nVOXEL_SLED=8\n' > "$REPO/hosts/typo.env"
   run "$REPO/bin/homicron" apply typo
@@ -176,22 +112,160 @@ EOS
   refute_called '^rsync'
 }
 
-@test "exit 255 reports unreachable and exits 1" {
-  make_fake ssh 255
+@test "ships, starts the service, streams the log, and says complete" {
+  box_fake
+  printf 'line one\napply complete\n' > "$STREAM"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called '^rsync .* root@box.local:/opt/homicron/$'
+  assert_called 'root@box.local /opt/homicron/start-apply.sh$'
+  assert_called 'root@box.local /opt/homicron/watch-apply.sh 0 7200$'
+  [[ "$output" == *$'enabled and started\nline one\napply complete' ]]
+  [[ "${lines[-1]}" == "apply complete" ]]
+  refute_called 'run-step'
+  refute_called 'pfexec'
+}
+
+@test "the watch starts after the lines an earlier run left in the log" {
+  box_fake
+  printf '42\n' > "$LOG_LINES"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called 'watch-apply.sh 42 7200$'
+}
+
+@test "a running apply is attached from its run header, with nothing shipped" {
+  box_fake
+  printf 'offline* 10:00:00\n' > "$STATE"
+  printf '7\n' > "$HEADER_LINE"
+  printf 'rest\napply complete\n' > "$STREAM"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  refute_called '^rsync'
+  refute_called 'start-apply.sh'
+  assert_called 'watch-apply.sh 6 7200$'
+  [[ "$output" == *"already running on the box since 10:00:00"* ]]
+}
+
+@test "a reboot line then 255 waits for a new boot time and reconnects with the line count" {
+  box_fake
+  printf 'x\nrebooting for 30-pkg.sh\n' > "$STREAM.1"; printf '255\n' > "$WATCH_EXIT.1"
+  printf 'apply complete\n' > "$STREAM.2"; printf '0\n' > "$WATCH_EXIT.2"
+  # the boot time changes after the first kstat read
+  cat >> "$FAKE_BIN/ssh.script" <<'EOS'
+EOS
+  printf 'n=$(grep -c kstat "$FAKE_LOG"); if (( n <= 1 )); then echo 1000; else echo 1001; fi > "$BATS_TEST_TMPDIR/boot"\n' > "$FAKE_BIN/boot.sh"
+  sed -i '' 's|\*kstat\*) |*kstat*) bash "$FAKE_BIN/boot.sh"; |' "$FAKE_BIN/ssh.script"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  refute_called 'root@box.local reboot$'
+  assert_called 'watch-apply.sh 0 7200$'
+  assert_called 'watch-apply.sh 2 7200$'
+  [[ "$output" == *"waiting for the box to come back"* ]]
+  [[ "${lines[-1]}" == "apply complete" ]]
+}
+
+@test "a reboot line then 255, without kstat, waits for ssh to return" {
+  box_fake
+  printf 'rebooting for 30-pkg.sh\n' > "$STREAM.1"; printf '255\n' > "$WATCH_EXIT.1"
+  printf 'apply complete\n' > "$STREAM.2"; printf '0\n' > "$WATCH_EXIT.2"
+  sed -i '' 's|\*kstat\*) .*|*kstat*) exit 1 ;;|' "$FAKE_BIN/ssh.script"
+  sed -i '' 's|\*) exit 0 ;;|*root@box.local\\ true) t=$(grep -c "true$" "$FAKE_LOG"); if (( t <= 2 )); then exit 255; else exit 0; fi ;;\n  *) exit 0 ;;|' "$FAKE_BIN/ssh.script"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c 'true$')" -eq 3 ]
+  assert_called 'watch-apply.sh 1 7200$'
+}
+
+@test "a box that never comes back after the reboot line is reported with the timeout" {
+  box_fake
+  printf 'rebooting for 30-pkg.sh\n' > "$STREAM"; printf '255\n' > "$WATCH_EXIT"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot reach box.local after reboot (30s)"* ]]
+  # 30 s of timeout at 5 s a poll: six waits, then the deadline
+  [ "$(fake_calls | grep -c '^sleep 5$')" -eq 6 ]
+}
+
+@test "255 without a reboot line is unreachable" {
+  box_fake
+  printf 'x\n' > "$STREAM"; printf '255\n' > "$WATCH_EXIT"
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot reach box.local"* ]]
   [[ "$output" == *"host key"* ]]
-  [[ "$output" == *"ssh root@box.local"* ]]
 }
 
-@test "other failures stop, print the log, and pass the status through" {
-  printf 'case "$*" in *10-a.sh) exit 3;; *cat*) echo LOGLINE; exit 0;; *) exit 0;; esac\n' > "$FAKE_BIN/ssh.script"
+@test "an unreachable box is reported at the first ssh, before rsync" {
+  make_fake ssh 255
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot reach box.local"* ]]
+  [[ "$output" == *"ssh root@box.local"* ]]
+  refute_called '^rsync'
+}
+
+@test "rsync failing to connect reports unreachable and never starts the service" {
+  box_fake
+  make_fake rsync 255
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot reach box.local"* ]]
+  refute_called 'start-apply.sh'
+}
+
+@test "a service that does not exist yet counts as not running" {
+  box_fake
+  sed -i '' 's|\*svcs\*) .*|*svcs*) exit 1 ;;|' "$FAKE_BIN/ssh.script"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called '^rsync'
+  assert_called 'start-apply.sh$'
+}
+
+@test "a failed step exits with its status and names it" {
+  box_fake
+  printf 'some output\nstep 10-a.sh failed with status 3\n' > "$STREAM"; printf '1\n' > "$WATCH_EXIT"
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 3 ]
-  [[ "$output" == *LOGLINE* ]]
-  [[ "$output" == *"step 10-a.sh failed with status 3" ]]
-  refute_called '20-b.sh$'
+  [[ "${lines[-1]}" == "homicron: step 10-a.sh failed with status 3" ]]
+  refute_called 'cat /var/log'
+}
+
+@test "a watch timeout says how to rejoin" {
+  box_fake
+  printf '4\n' > "$WATCH_EXIT"
+  HOMICRON_APPLY_TIMEOUT=30 run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  assert_called 'watch-apply.sh 0 30$'
+  [[ "$output" == *"still running after 30s; rejoin with homicron apply box"* ]]
+}
+
+@test "an unexpected watch exit names the status and the log" {
+  box_fake
+  printf 'service is disabled\n' > "$STREAM"; printf '3\n' > "$WATCH_EXIT"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"service is disabled"* ]]
+  [[ "$output" == *"/var/log/homicron/apply.log"* ]]
+}
+
+@test "start-apply failing stops with its output" {
+  box_fake
+  sed -i '' 's|\*start-apply.sh\*) .*|*start-apply.sh*) echo "bad manifest"; exit 2 ;;|' "$FAKE_BIN/ssh.script"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bad manifest"* ]]
+  refute_called 'watch-apply.sh'
+}
+
+@test "start-apply reporting a running apply attaches from the run header" {
+  box_fake
+  printf 'an apply is already running on the box\n' > "$START"
+  printf '7\n' > "$HEADER_LINE"
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  assert_called 'watch-apply.sh 6 7200$'
 }
 
 @test "ssh subcommand uses the user and port, without keepalives" {
@@ -203,7 +277,7 @@ EOS
 @test "every ssh and the rsync transport carry keepalives" {
   run "$REPO/bin/homicron" apply box
   [ "$status" -eq 0 ]
-  assert_called '^ssh -p 2222 -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@box.local /opt/homicron/run-step.sh 10-a.sh$'
+  assert_called '^ssh -p 2222 -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 root@box.local /opt/homicron/watch-apply.sh 0 7200$'
   assert_called '^rsync .* -e ssh -p 2222 -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 .*host.env$'
 }
 
@@ -213,7 +287,7 @@ EOS
   [ "$status" -eq 1 ]
   [[ "$output" == *"rsync failed with status 127"* ]]
   [[ "$output" != *"cannot reach"* ]]
-  refute_called '^ssh'
+  refute_called 'start-apply.sh'
 }
 
 @test "sends a resolved host.env with defaults and environment overrides" {
@@ -241,16 +315,6 @@ EOS
   [ "$status" -eq 2 ]
   [[ "$output" == *"HOMICRON_ADDR"* ]]
   refute_called '^rsync'
-}
-
-@test "rsync failing to connect reports unreachable and never runs a step" {
-  make_fake rsync 255
-  run "$REPO/bin/homicron" apply box
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot reach box.local"* ]]
-  [[ "$output" == *"host key"* ]]
-  [[ "$output" == *"ssh root@box.local"* ]]
-  refute_called '^ssh'
 }
 
 @test "by default the shipped keys are every ~/.ssh/*.pub, each ending in a newline, certificates skipped" {

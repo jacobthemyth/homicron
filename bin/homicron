@@ -2,8 +2,14 @@
 #
 # homicron: workstation-side runner.
 #
-#   bin/homicron apply <name>    rsync host/ to the box and run every step over ssh
+#   bin/homicron apply <name>    rsync host/ to the box, start the SMF service
+#                                site/homicron-apply, and stream its log
 #   bin/homicron ssh <name>      open a shell on the box as $HOMICRON_USER
+#
+# The steps run on the box under svc:/site/homicron-apply, so one apply runs
+# at a time, a lost ssh or a Ctrl-C leaves it running, and a second apply
+# attaches to it. A reboot a step asks for is done by the box; the runner
+# waits and reconnects.
 #
 # <name> selects hosts/<name>.env. A variable already set in the environment
 # wins over the file, so private addresses never need to be committed.
@@ -16,6 +22,8 @@ set -o errexit -o pipefail -o nounset
 root=$(cd "$(dirname "$0")/.." && pwd)
 remote_dir=/opt/homicron
 remote_log_dir=/var/log/homicron
+remote_log=$remote_log_dir/apply.log
+service=site/homicron-apply
 # Every ssh and the rsync transport use these. Keepalives: a NAT or port
 # forward (qemu user networking, some firewalls) never closes the connection
 # when the box goes down, and a plain ssh would hang forever. The connect
@@ -24,8 +32,8 @@ ssh_opts=()
 
 poll=${HOMICRON_POLL_SECONDS:-5}
 reboot_timeout=${HOMICRON_REBOOT_TIMEOUT:-600}
-# How long a sent reboot gets before an unchanged box means it was lost.
-reboot_grace=${HOMICRON_REBOOT_GRACE:-60}
+# How long watch-apply.sh waits on the box for the service to settle.
+apply_timeout=${HOMICRON_APPLY_TIMEOUT:-7200}
 
 # The variables a hosts file may set and host.env always carries. load_host
 # refuses any other key, so a typo cannot fall back to a default in silence.
@@ -226,61 +234,79 @@ boot_time() {
   remote 'kstat -p unix:0:system_misc:boot_time' 2>/dev/null | awk '{ print $2 }'
 }
 
-# Reboot the box and wait until it is back with a new boot time. When ssh
-# works but the boot time is unchanged after the grace period, the reboot
-# never reached the box, so it is sent again. A box without kstat falls back
-# to "ssh dropped, then works again".
-reboot_box() {
-  local before after sent went_down=no deadline
+# "<state> <stime>" of the service, "missing -" when it is not imported yet,
+# "unreachable -" when ssh failed (this runs in a subshell, so the caller
+# ends the apply; a die here would only end the subshell).
+service_state() {
+  local out status=0
+  out=$(remote "svcs -H -o state,stime $service 2>/dev/null") || status=$?
+  if (( status == 255 )); then
+    printf 'unreachable -\n'
+  elif (( status == 0 )) && [[ -n $out ]]; then
+    printf '%s\n' "$out"
+  else
+    printf 'missing -\n'
+  fi
+}
+
+# Lines in apply.log now, so only the new run is streamed.
+log_lines() {
+  local n
+  n=$(remote "wc -l < $remote_log 2>/dev/null || echo 0") || n=0
+  n=${n// /}
+  printf '%s\n' "${n:-0}"
+}
+
+# The line before the current run's header, so an attach starts at the header.
+run_header_offset() {
+  local n
+  n=$(remote "grep -n '^=== run' $remote_log 2>/dev/null | tail -1 | cut -d: -f1") || n=
+  n=${n// /}
+  printf '%s\n' "$(( ${n:-1} - 1 ))"
+}
+
+# The box announced a reboot and the ssh dropped. Wait until it is back with
+# a new boot time, or, when the boot time could not be read before, until
+# ssh works again.
+wait_for_reboot() {
+  local before="$1" after deadline
+  printf 'waiting for the box to come back\n'
   deadline=$(( $(now) + reboot_timeout ))
-  before=$(boot_time) || before=
-  remote reboot || true
-  sent=$(now)
   while true; do
     if (( $(now) >= deadline )); then
       die "cannot reach $HOMICRON_ADDR after reboot (${reboot_timeout}s)"
     fi
     sleep "$poll"
     if [[ -z $before ]]; then
-      if ! remote true >/dev/null 2>&1; then
-        went_down=yes
-        continue
-      fi
-      [[ $went_down == yes ]] && return 0
+      remote true >/dev/null 2>&1 && return 0
     else
       after=$(boot_time) || continue
-      if [[ -n $after && $after != "$before" ]]; then
-        return 0
-      fi
+      [[ -n $after && $after != "$before" ]] && return 0
     fi
-    # The box answers and has not rebooted. Give the reboot its grace period
-    # before deciding it was lost.
-    (( $(now) - sent < reboot_grace )) && continue
-    printf 'box has not rebooted yet; sending reboot again\n'
-    remote reboot || true
-    sent=$(now)
   done
 }
 
-run_step() {
-  local step="$1" status=0
-  printf '==> %s\n' "$step"
-  remote "$remote_dir/run-step.sh $step" || status=$?
-  return $status
-}
-
-step_failed() {
-  local step="$1" status="$2"
-  if (( status == 255 )); then
-    unreachable
-  fi
-  printf -- '--- %s/%s.log ---\n' "$remote_log_dir" "$step"
-  remote "cat $remote_log_dir/$step.log" || true
-  die "step $step failed with status $status" "$status"
+# Stream apply.log from line $seen through watch-apply.sh, counting the
+# lines shown and keeping the last one. Returns the watcher's status (255
+# when ssh dropped), carried on a sentinel line so it survives the pipe.
+seen=0
+last_line=
+watch() {
+  local line status=0
+  while IFS= read -r line; do
+    if [[ $line == "__watch_exit "* ]]; then
+      status=${line#__watch_exit }
+      continue
+    fi
+    printf '%s\n' "$line"
+    seen=$(( seen + 1 ))
+    last_line=$line
+  done < <(remote "$remote_dir/watch-apply.sh $seen $apply_timeout" || status=$?; printf '__watch_exit %s\n' "$status")
+  return "$status"
 }
 
 apply() {
-  local name="$1" step status tmp
+  local name="$1" state stime tmp before out status
   load_host "$name"
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064  # expand now: the local is gone when the trap runs
@@ -288,29 +314,46 @@ apply() {
   write_resolved_env "$tmp/host.env"
   collect_keys "$tmp/authorized_keys"
 
-  printf 'syncing host/ to root@%s:%s\n' "$HOMICRON_ADDR" "$remote_dir"
-  sync_to_box "$root/host/" "" --delete
-  sync_to_box "$tmp/host.env" host.env
-  sync_to_box "$tmp/authorized_keys" authorized_keys
-
-  for path in "$root"/host/[0-9][0-9]-*.sh; do
-    step=$(basename "$path")
+  read -r state stime <<< "$(service_state)"
+  [[ $state == unreachable ]] && unreachable
+  if [[ $state == offline* ]]; then
+    printf 'an apply is already running on the box since %s; attaching, nothing was shipped\n' "$stime"
+    seen=$(run_header_offset)
+  else
+    seen=$(log_lines)
+    printf 'syncing host/ to root@%s:%s\n' "$HOMICRON_ADDR" "$remote_dir"
+    sync_to_box "$root/host/" "" --delete
+    sync_to_box "$tmp/host.env" host.env
+    sync_to_box "$tmp/authorized_keys" authorized_keys
     status=0
-    run_step "$step" || status=$?
-    if (( status == 10 )); then
-      printf '%s requested a reboot\n' "$step"
-      reboot_box
-      status=0
-      run_step "$step" || status=$?
-    fi
-    if (( status != 0 )); then
-      step_failed "$step" "$status"
-    fi
-  done
+    out=$(remote "$remote_dir/start-apply.sh") || status=$?
+    (( status == 255 )) && unreachable
+    [[ -n $out ]] && printf '%s\n' "$out"
+    (( status != 0 )) && die "start-apply.sh exited $status" 1
+    [[ $out == "an apply is already running on the box" ]] && seen=$(run_header_offset)
+  fi
 
-  printf 'apply complete\n'
-  printf 'next, on the box, build the voxel images (30 to 45 minutes):\n'
-  printf '  pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto\n'
+  before=$(boot_time) || before=
+  while true; do
+    status=0
+    watch || status=$?
+    case $status in
+      0) exit 0 ;;
+      1)
+        if [[ $last_line =~ ^step\ (.+)\ failed\ with\ status\ ([0-9]+) ]]; then
+          die "step ${BASH_REMATCH[1]} failed with status ${BASH_REMATCH[2]}" "${BASH_REMATCH[2]}"
+        fi
+        die "a step failed; the log is $remote_log on the box" 1
+        ;;
+      255)
+        [[ $last_line == "rebooting for "* ]] || unreachable
+        wait_for_reboot "$before"
+        before=$(boot_time) || before=
+        ;;
+      4) die "apply still running after ${apply_timeout}s; rejoin with homicron apply $name" 1 ;;
+      *) die "watch-apply.sh exited $status; the log is $remote_log on the box" 1 ;;
+    esac
+  done
 }
 
 (( $# == 2 )) || usage
