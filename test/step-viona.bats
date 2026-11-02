@@ -105,3 +105,16 @@ EOS
   [ "$status" -eq 0 ]
   refute_called '^modload'
 }
+
+@test "a long module listing after the viona line still counts as loaded" {
+  # grep -q exits at the first match; under pipefail a modinfo that keeps
+  # writing then dies of SIGPIPE and the pipeline fails at random. Make the
+  # tail long enough that the race is certain.
+  printf '[[ -f $MASK_FILE ]] && echo "184 fffffffff4184000 97e8 289 1 viona (Virtio Network Accelerator)"; seq 1 300000\n' > "$FAKE_BIN/modinfo.script"
+  printf '%s\n' "$LINE" >> "$HOMICRON_ETC/system"
+  printf '20000000\n' > "$MASK_FILE"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already in the desired state"* ]]
+  refute_called '^mdb -kw'
+}

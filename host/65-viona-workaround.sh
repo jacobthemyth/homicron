@@ -42,8 +42,11 @@ live_mask() {
   echo 'viona_feat_disable_mask/X' | mdb -k 2>/dev/null | awk 'END { print $2 }'
 }
 
+# awk reads the whole listing. `grep -q` would exit at the first match, and
+# under pipefail a modinfo that is still writing then dies of SIGPIPE and
+# fails the pipeline at random.
 viona_loaded() {
-  modinfo 2>/dev/null | grep -q '[[:space:]]viona[[:space:]]'
+  modinfo 2>/dev/null | awk '/[[:space:]]viona[[:space:]]/ { found = 1 } END { exit !found }'
 }
 
 live_ok() {
