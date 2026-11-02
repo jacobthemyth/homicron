@@ -79,8 +79,9 @@ failing step is handled rather than killing the method:
 1. Source `$HOMICRON_DIR/host.env` with `allexport`, as `run-step.sh` does,
    and export `HOMICRON_DIR`.
 2. If the marker `/var/homicron/apply-requested` is absent, exit 0 at once.
-   This is the boot case with no apply in flight.
-3. Append a run header to `/var/log/homicron/apply.log`:
+   This is the boot case with no apply in flight. A missing `host.env`
+   logs and exits 96 (`SMF_EXIT_ERR_CONFIG`).
+3. Append a run header to `/var/homicron/apply.log`:
    `=== run <UTC time>` on the first run of an apply, with ` (resumed after
    reboot)` when the boot time recorded in the marker differs from the
    kernel's current boot time.
@@ -95,9 +96,12 @@ failing step is handled rather than killing the method:
      runs again. If that step asks for a reboot a second time in a row (the
      marker already names it), it is failed with `step <step> failed with
      status 10 (asked for a second reboot)` instead, so a step that never
-     settles cannot reboot the box forever.
-   - Any other status: log `step <step> failed with status <N>` and exit 1.
-     SMF puts the service in `maintenance`.
+     settles cannot reboot the box forever. The method sleeps 3 seconds
+     between the `rebooting for` line and `reboot`, so the watcher, which
+     polls once a second, reads the line before the reboot kills it.
+   - Any other status: log `step <step> failed with status <N>` and exit
+     95 (`SMF_EXIT_ERR_FATAL`). SMF puts the service in `maintenance` at
+     once; a plain exit 1 would make startd retry the method.
 5. After the last step, delete the marker, log `apply complete`, and exit 0.
    The service is `online`, which means converged.
 
@@ -105,9 +109,13 @@ The log lines `rebooting for <step>`, `step <step> failed with status <N>`,
 and `apply complete` are the protocol the runner reads. Their format is
 fixed by the tests in `test/apply.bats` and `test/homicron.bats`.
 
-`/var/homicron` is created by `start-apply.sh` with mode 0755. It is on the
-root pool, so the marker survives a reboot. `/var/log/homicron` is created
-by `apply.sh` as `run-step.sh` creates it today.
+`/var/homicron` holds the marker and `apply.log` and is its own dataset,
+`rpool/homicron`, which `start-apply.sh` creates when missing. It must be
+outside the boot environment: `pkg update` clones the root before step 30
+asks for a reboot, so a marker or log line written to the root after the
+clone is absent in the new boot environment, which would disarm the
+second-reboot guard and make the runner's line offset overshoot. The
+per-step logs stay in `/var/log/homicron`, created by `apply.sh`.
 
 ## Starting a run: `host/start-apply.sh`
 
@@ -117,15 +125,21 @@ nonzero before changing anything:
 
 1. `svccfg validate /opt/homicron/homicron-apply.xml`. On failure, print
    the validator's output and exit 2.
-2. `mkdir -p /lib/svc/manifest/site /var/homicron`, copy the manifest into
+2. Create `rpool/homicron` mounted at `/var/homicron` when missing,
+   `mkdir -p /lib/svc/manifest/site /var/homicron`, copy the manifest into
    place, `svccfg import` it.
 3. Write the kernel boot time (`kstat -p unix:0:system_misc:boot_time`)
    to `/var/homicron/apply-requested`.
 4. Read the state with `svcs -H -o state site/homicron-apply` and act:
-   - `offline*` (method running, state printed with a trailing `*`): print
-     `an apply is already running on the box` and exit 0 without touching
-     the service. The runner normally never reaches this, see below, but
-     two runners can race here and the second must not restart the first.
+   - `offline` (waiting for dependencies, as during boot), `offline*`
+     (method running), or any state with a trailing `*` (startd is moving
+     it): print `an apply is already running on the box` and exit 0
+     without touching the service. The runner normally never reaches this,
+     see below, but two runners can race here and the second must not
+     restart the first.
+   After each `svcadm` below, poll the state up to 40 times at 0.25 s until
+   it differs from what it was: `svcadm` returns before startd acts, and a
+   watcher that read the old settled state would call the run finished.
    - `maintenance`: `svcadm clear site/homicron-apply`, print `cleared
      the failed run and started`.
    - `disabled` or `uninitialized`: `svcadm enable site/homicron-apply`,
@@ -138,13 +152,15 @@ nonzero before changing anything:
 The runner streams the log through one remote script, so the ssh carries
 only log lines. `watch-apply.sh N MAX` loops once a second:
 
-1. Print every line of `/var/log/homicron/apply.log` after line N (a
-   missing log, or N past its end, prints nothing), then set N to the
-   file's line count.
-2. Read the service state. While it is `offline*` (or the service is not
-   yet imported), sleep 1 and repeat, and exit 4 once MAX seconds of
-   polling have passed. `online`: exit 0. `maintenance`: exit 1. Any other
-   state: print `service is <state>` and exit 3.
+1. Count the lines of `/var/homicron/apply.log` and print exactly lines
+   N+1 through that count (a missing log, or N past its end, prints
+   nothing; a line still being written waits for the next pass), then set
+   N to the count.
+2. Read the service state. While it is `offline`, `offline*`, any state
+   with a trailing `*`, or the service is not yet imported, sleep 1 and
+   repeat, and exit 4 once MAX seconds of polling have passed. `online`:
+   exit 0. `maintenance`: exit 1. Any other state: print `service is
+   <state>` and exit 3.
 
 The runner passes the number of lines it has already printed, so a
 reconnect after a reboot or a dropped connection shows each line once.
@@ -158,8 +174,7 @@ completed by the `==>` or status line that follows it).
 keepalives, `unreachable`, and `homicron ssh` are unchanged. The step loop,
 `run_step`, `step_failed`, and the post-apply build hint are removed.
 `reboot_box` is split: the part that sends `reboot` goes away, and the wait
-(`before` boot time, poll for a different one, fall back to "ssh dropped
-then returned") becomes `wait_for_reboot`. The new `apply`:
+becomes `wait_for_box`. The new `apply`:
 
 1. Ask the box for the service state. If the method is running, print
    `an apply is already running on the box since <time>; attaching, nothing
@@ -181,11 +196,15 @@ then returned") becomes `wait_for_reboot`. The new `apply`:
      status` line seen, print `step <step> failed with status <N>` to
      stderr, and exit with `<N>` as today. The step's own output was
      already streamed, so the log is not printed again.
-   - 255: if the last line seen is `rebooting for <step>`, run
-     `wait_for_reboot` and return to step 4 with the current count.
-     Otherwise call `unreachable`.
+   - 255: the connection dropped. Wait up to `HOMICRON_REBOOT_TIMEOUT`
+     for the box to answer again: after a `rebooting for <step>` line that
+     means a new boot time, otherwise the first answer; then return to
+     step 4 with the current count. Past the deadline, die with `cannot
+     reach <addr> after <N>s; the apply continues on the box, rejoin with
+     homicron apply <name>`. The `unreachable` message is reserved for the
+     first ssh, before anything is shipped.
    - Anything else: die with `watch-apply.sh exited <status>; the log is
-     /var/log/homicron/apply.log on the box`.
+     /var/homicron/apply.log on the box`.
    - 4: die with `apply still running after <N>s; rejoin with homicron
      apply <name>` and exit 1. The method on the box continues.
 5. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) is the MAX the runner
@@ -221,6 +240,9 @@ step 80 adds nothing to that.
 
 - A fresh box has no service. `start-apply.sh` imports the manifest and
   `svcadm enable` starts it; `install/install.sh` needs nothing new.
+- The runner's `watch` carries the remote exit status on a sentinel line,
+  because the workstation's bash 3.2 cannot `wait` on a process
+  substitution.
 - A failed step leaves the marker in place and the service in
   `maintenance`. SMF keeps `maintenance` across reboots, so a hand reboot of
   a broken box runs nothing until the next `apply` clears it.

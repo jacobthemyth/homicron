@@ -21,13 +21,7 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
    bin/homicron apply <hostname>
    ```
 
-   `apply` ships the public keys of this workstation (`~/.ssh/*.pub`) to root and to the new login. A hosts file that sets `HOMICRON_KEYS` replaces that default, and the login and uid default to this workstation's. The runner rsyncs `host/` to the machine and runs each step over ssh. A step that updates the operating system asks for a reboot; the runner reboots, waits, and continues. Run `apply` again after any failure; steps that are already done skip themselves.
-7. Build the voxel images on the machine (30 to 45 minutes). The binary is not on the PATH, so the command names its path:
-
-   ```
-   bin/homicron ssh <hostname>
-   pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto
-   ```
+   `apply` ships the public keys of this workstation (`~/.ssh/*.pub`) to root and to the new login. A hosts file that sets `HOMICRON_KEYS` replaces that default, and the login and uid default to this workstation's. The runner rsyncs `host/` to the machine and starts the SMF service `site/homicron-apply`, which runs each step in order on the machine itself and ends with the voxel image build (30 to 45 minutes); the output streams to your terminal. The service, not the runner, owns the run: Ctrl-C or a dropped connection leaves it going on the machine, and the same `apply` command rejoins it. A step that updates the operating system reboots the machine; the runner waits and reconnects. A failed step leaves the service in `maintenance` with the step's output in the stream; fix the cause and run `apply` again, which clears the service and reruns the steps, each skipping itself when already done.
 
 ## Known issue: Linux guests freeze under voxel
 
@@ -51,7 +45,7 @@ Confirm by booting once with the first disk detached. The pool reports DEGRADED 
 |---|---|---|
 | `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with the keys from `HOMICRON_KEYS_URL`, the first-boot service, the DNS hook, the ramdisk's resolv.conf, and `/etc/homicron.conf` |
 | `firstboot/` | first boot, once | DHCP and IPv6 autoconfiguration on every cabled NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the addresses, disable itself |
-| `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, `voxel.toml` |
+| `host/NN-*.sh` | on the machine, as the SMF service `site/homicron-apply` | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, `voxel.toml`, the voxel images |
 
 ## Rehearse in a VM
 
@@ -118,3 +112,5 @@ test/run-tests.sh   bats tests; target commands are faked on PATH
 ```
 
 CI runs both on every push and deploys the site from `main` with `pages/build-site.sh`.
+
+On the machine, `host/apply.sh` is the start method of `site/homicron-apply` and runs the steps; `host/start-apply.sh` imports `host/homicron-apply.xml` and starts a run; `host/watch-apply.sh` streams the log to the runner. The log is `/var/homicron/apply.log`, on its own dataset `rpool/homicron` so it survives the boot environment switch of an OS update, with one file per step under `/var/log/homicron`. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) bounds how long one `apply` watches before telling you to rejoin. Use `svcadm` and `svcs` on the service rather than running `apply.sh` by hand.

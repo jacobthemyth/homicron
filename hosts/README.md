@@ -34,6 +34,9 @@ file. Two workstations that both use the default remove each other's key on
 every run. A setup with more than one workstation points `HOMICRON_KEYS` at
 one shared URL, the same URL the install line used.
 
+When an apply is already running on the host, `apply` attaches to it and
+ships nothing; the service on the host owns the run.
+
 The default address `<name>.local` needs an mDNS resolver on the
 workstation. macOS has one. Many Linux hosts get one from avahi or
 systemd-resolved.

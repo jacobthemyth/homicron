@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<!--
+    homicron apply service. bin/homicron ships this file in host/ and
+    start-apply.sh imports it on every apply, so a change lands with the
+    same rsync as a step change. Transient: the start method is the step
+    loop (apply.sh), which runs once per start and exits.
+-->
+<service_bundle type='manifest' name='homicron-apply'>
+<service name='site/homicron-apply' type='service' version='1'>
+    <create_default_instance enabled='false' />
+    <single_instance />
+
+    <dependency
+        name='multi-user-server'
+        grouping='require_all'
+        restart_on='none'
+        type='service'>
+        <service_fmri value='svc:/milestone/multi-user-server:default' />
+    </dependency>
+
+    <exec_method
+        type='method'
+        name='start'
+        exec='/opt/homicron/apply.sh'
+        timeout_seconds='0' />
+
+    <exec_method
+        type='method'
+        name='stop'
+        exec=':true'
+        timeout_seconds='3' />
+
+    <property_group name='startd' type='framework'>
+        <propval name='duration' type='astring' value='transient' />
+    </property_group>
+
+    <stability value='Unstable' />
+
+    <template>
+        <common_name>
+            <loctext xml:lang='C'>
+                homicron apply: run the host steps
+            </loctext>
+        </common_name>
+    </template>
+</service>
+</service_bundle>
