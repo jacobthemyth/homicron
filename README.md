@@ -31,7 +31,7 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
 
 ## Known issue: Linux guests freeze under voxel
 
-Current Helios advertises a viona feature that the propolis behind voxel's pinned falcon mishandles ([falcon issue 383](https://github.com/oxidecomputer/falcon/issues/383)). A Linux guest with a NIC freezes when it brings the NIC up, and `voxel image create-frr` stops at the Debian builder's login with `timeout waiting for data`. Step 65 sets `viona:viona_feat_disable_mask=0x20000000` in `/etc/system` and in the running kernel. The step logs a warning when the voxel checkout is not at the commit the workaround was validated on. Once voxel pins a falcon whose propolis is at or past commit `6588611`, remove the line and the step.
+Current Helios advertises a viona feature that the propolis behind voxel's pinned falcon mishandles ([falcon issue 383](https://github.com/oxidecomputer/falcon/issues/383)). A Linux guest with a NIC freezes when it brings the NIC up, and `voxel image create-frr` stops at the Debian builder's login with `timeout waiting for data`. Step 65 adds `set viona:viona_feat_disable_mask=0x20000000` to `/etc/system`, which the kernel reads at the next boot, and sets the same value in the running kernel now, loading the viona module first when no VM has loaded it yet. The step logs a warning when the voxel checkout is not at the commit the workaround was validated on. Once voxel pins a falcon whose propolis is at or past commit `6588611`, remove the line and the step.
 
 ## Add a mirror disk later
 

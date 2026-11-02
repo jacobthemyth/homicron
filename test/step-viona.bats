@@ -20,9 +20,12 @@ if [[ ! -f $MASK_FILE ]]; then echo "mdb: failed to dereference symbol: unknown 
 if [[ $* == *-kw* ]]; then v=${in##*/Z }; printf '%s\n' "${v#0x}" > "$MASK_FILE"; exit 0; fi
 printf 'viona_feat_disable_mask:\nviona_feat_disable_mask:        %s\n' "$(cat "$MASK_FILE")"
 EOS
-  # modinfo lists viona only while the module is loaded; the mask file stands in for that.
+  # modinfo lists viona only while the module is loaded; the mask file stands
+  # in for that, and the fake modload creates it with the compiled default.
   make_fake modinfo
   printf '[[ -f $MASK_FILE ]] && echo "184 fffffffff4184000 97e8 289 1 viona (Virtio Network Accelerator)"; exit 0\n' > "$FAKE_BIN/modinfo.script"
+  make_fake modload
+  printf 'printf "0\\n" > "$MASK_FILE"; exit 0\n' > "$FAKE_BIN/modload.script"
   # The fake su answers git rev-parse with the commit in $HEAD_FILE.
   export HEAD_FILE="$BATS_TEST_TMPDIR/head"
   printf '%s\n' "$VALIDATED" > "$HEAD_FILE"
@@ -87,11 +90,18 @@ EOS
   grep -qxF "$LINE" "$HOMICRON_ETC/system"
 }
 
-@test "an unloaded viona module is a satisfied live state: the /etc/system line applies at load" {
+@test "an unloaded viona module is loaded with modload so the mask can be set live" {
   rm -f "$MASK_FILE"
   run "$STEP"
   [ "$status" -eq 0 ]
   grep -qxF "$LINE" "$HOMICRON_ETC/system"
-  refute_called '^mdb'
-  [[ "$output" != *"end state not reached"* ]]
+  assert_called '^modload /usr/kernel/drv/amd64/viona$'
+  assert_called '^mdb -kw'
+  [ "$(cat "$MASK_FILE")" = 20000000 ]
+}
+
+@test "a loaded module is not loaded again" {
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  refute_called '^modload'
 }

@@ -9,10 +9,11 @@
 # Masking the feature in the host driver avoids it.
 #   https://github.com/oxidecomputer/falcon/issues/383
 #
-# End state: /etc/system carries the mask line, so it survives a reboot, and
-# the running kernel already has the mask when the viona module is loaded, so
-# no reboot is needed now. While the module is not loaded (no VM has run since
-# boot) the line alone is the end state: the kernel applies it at module load.
+# End state: /etc/system carries the mask line, and the loaded viona module
+# has the mask in the running kernel. The kernel reads /etc/system once, at
+# boot, so a line added now only takes effect from the next boot; until then
+# the live value is what counts, and setting it needs the module loaded. When
+# no VM has loaded viona yet, the step loads it with modload first.
 #
 # The workaround was validated with voxel at $validated_commit. When the
 # checkout is at any other commit the step logs a warning: once voxel pins a
@@ -46,7 +47,7 @@ viona_loaded() {
 }
 
 live_ok() {
-  ! viona_loaded || [[ $(live_mask) == "$mask" ]]
+  viona_loaded && [[ $(live_mask) == "$mask" ]]
 }
 
 check() {
@@ -61,6 +62,10 @@ apply() {
       printf '\n' >> "$system_file"
     fi
     printf '* homicron: viona workaround for %s\n%s\n' "$issue" "$line" >> "$system_file"
+  fi
+  if ! viona_loaded; then
+    log "loading the viona module"
+    modload /usr/kernel/drv/amd64/viona
   fi
   if ! live_ok; then
     log "setting the live viona mask"
