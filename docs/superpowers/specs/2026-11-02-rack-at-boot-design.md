@@ -191,11 +191,18 @@ two methods under `/opt/homicron/` match the shipped files, the service is
 imported, and it is enabled when `VOXEL_RACK` is `yes` and disabled
 otherwise.
 
-- `check`: `cmp` the three files; `svcs -H -o state site/voxel-rack`
-  prints a state; the enabled property matches `VOXEL_RACK`.
-- `apply`: `svccfg validate`, copy the manifest, `svccfg import` (an
-  idempotent upgrade as the apply spec describes), then `svcadm enable`
-  or `svcadm disable`. The step does not wait for the launch: it exits
+The two method scripts need no install step of their own: the runner's
+rsync puts every file in `host/` under `/opt/homicron`, which is where
+the manifest points.
+
+- `check`: the installed manifest `cmp`s the shipped one; `svcs -H -o
+  state site/voxel-rack` prints a state; enabled (`online`, `offline`,
+  `offline*`) matches `VOXEL_RACK`.
+- `apply`: when the manifest differs or is missing, `svccfg validate`
+  (print its output and exit 1 on failure), copy, `svccfg import` (an
+  idempotent upgrade as the apply spec describes). Then `svcadm enable`
+  or `svcadm disable` when the enabled state differs from `VOXEL_RACK`.
+  A converged box runs nothing. The step does not wait for the launch: it exits
   once the service is enabled, and the apply log says
   `voxel-rack enabled; the launch runs under svc:/site/voxel-rack, log
   /var/log/voxel-rack.log`. Enabling starts the launch at once on a
@@ -245,9 +252,10 @@ status.
    log's main content, so `--no-progress` is not used. SMF methods have no controlling
    terminal, so the VMs survive the method's exit.
 4. Read the result from the launch output: `launch complete` without a
-   preceding `rack-init FAILED` is success. On failure, log
-   `launch failed; see above` and exit 1, which puts the service in
-   `maintenance`. SMF kills the contract, which takes the VMs down; the
+   `rack-init FAILED` line is success. On failure, log
+   `launch failed; see above` and exit 95 (`SMF_EXIT_ERR_FATAL`, as
+   `apply.sh` does), which puts the service straight into `maintenance`.
+   A missing `host.env` exits 96 before anything runs. SMF kills the contract, which takes the VMs down; the
    next `svcadm clear` starts over from step 2.
 5. On success, if `/home/$HOMICRON_USER/.config/voxel/post-launch.sh`
    exists and is executable, run it as `$HOMICRON_USER` with the log as
@@ -350,13 +358,13 @@ bats with fakes, as the existing steps.
   digest match skips; mismatch deletes the part and exits 1; both curl
   calls carry `--retry`; the key is set.
 - `test/step-voxel-rack.bats`: validate failure exits before copy; import
-  on every apply; enable or disable by `VOXEL_RACK`; files compared by
-  `cmp`.
-- `test/voxel-rack-start.bats`: destroy only when `.falcon` exists; the
+  only when the manifest differs; enable or disable by `VOXEL_RACK`; a
+  converged box runs nothing.
+- `test/voxel-rack.bats` (start): destroy only when `.falcon` exists; the
   launch runs as the user with stdin from `/dev/null`; `launch complete`
-  exits 0; `rack-init FAILED` exits 1; the hook runs only on success and
+  exits 0; `rack-init FAILED` exits 95; a missing `host.env` exits 96; the hook runs only on success and
   only when executable; a failing hook leaves exit 0.
-- `test/voxel-rack-stop.bats`: destroy when `.falcon` exists, exit 0
+- `test/voxel-rack.bats` (stop): destroy when `.falcon` exists, exit 0
   either way.
 - `test/lint.sh` lists the new scripts; `xmllint --noout` the manifest.
 - The qemu rehearsal covers steps 25, 85, 87, and 90 with no rack: step 90
