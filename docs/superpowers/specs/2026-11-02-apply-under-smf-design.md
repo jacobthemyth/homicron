@@ -82,15 +82,20 @@ failing step is handled rather than killing the method:
    This is the boot case with no apply in flight.
 3. Append a run header to `/var/log/homicron/apply.log`:
    `=== run <UTC time>` on the first run of an apply, with ` (resumed after
-   reboot)` when the marker is older than the kernel boot time.
+   reboot)` when the boot time recorded in the marker differs from the
+   kernel's current boot time.
 4. For each `$HOMICRON_DIR/[0-9][0-9]-*.sh` in order: print `==> <step>`
    to the log, run `bash -x <step>` with its output appended to both
    `/var/log/homicron/<step>.log` (with the dated header as today) and
    `apply.log`, and read the status.
    - Status 0: next step.
-   - Status 10: log `rebooting for <step>`, flush, and run `reboot`. The
-     method does not return; the marker makes the method run again at
-     boot, where the same step runs again and must then exit 0.
+   - Status 10: rewrite the marker as `<boot time> <step>`, log
+     `rebooting for <step>`, and run `reboot`. The method does not return;
+     the marker makes the method run again at boot, where the same step
+     runs again. If that step asks for a reboot a second time in a row (the
+     marker already names it), it is failed with `step <step> failed with
+     status 10 (asked for a second reboot)` instead, so a step that never
+     settles cannot reboot the box forever.
    - Any other status: log `step <step> failed with status <N>` and exit 1.
      SMF puts the service in `maintenance`.
 5. After the last step, delete the marker, log `apply complete`, and exit 0.
@@ -114,7 +119,8 @@ nonzero before changing anything:
    the validator's output and exit 2.
 2. `mkdir -p /lib/svc/manifest/site /var/homicron`, copy the manifest into
    place, `svccfg import` it.
-3. `touch /var/homicron/apply-requested`.
+3. Write the kernel boot time (`kstat -p unix:0:system_misc:boot_time`)
+   to `/var/homicron/apply-requested`.
 4. Read the state with `svcs -H -o state site/homicron-apply` and act:
    - `offline*` (method running, state printed with a trailing `*`): print
      `an apply is already running on the box` and exit 0 without touching
@@ -127,16 +133,18 @@ nonzero before changing anything:
    - `online`: `svcadm restart site/homicron-apply`, print `restarted`.
    - Anything else: print the state and exit 1.
 
-## Watching a run: `host/watch-apply.sh <line-count>`
+## Watching a run: `host/watch-apply.sh <line-count> <max-seconds>`
 
 The runner streams the log through one remote script, so the ssh carries
-only log lines. `watch-apply.sh N` loops once a second:
+only log lines. `watch-apply.sh N MAX` loops once a second:
 
-1. Print every line of `/var/log/homicron/apply.log` after line N, then set
-   N to the file's line count.
-2. Read the service state. While it is `offline*`, sleep 1 and repeat.
-   `online`: exit 0. `maintenance`: exit 1. Any other state: print
-   `service is <state>` and exit 3.
+1. Print every line of `/var/log/homicron/apply.log` after line N (a
+   missing log, or N past its end, prints nothing), then set N to the
+   file's line count.
+2. Read the service state. While it is `offline*` (or the service is not
+   yet imported), sleep 1 and repeat, and exit 4 once MAX seconds of
+   polling have passed. `online`: exit 0. `maintenance`: exit 1. Any other
+   state: print `service is <state>` and exit 3.
 
 The runner passes the number of lines it has already printed, so a
 reconnect after a reboot or a dropped connection shows each line once.
@@ -156,16 +164,19 @@ then returned") becomes `wait_for_reboot`. The new `apply`:
 1. Ask the box for the service state. If the method is running, print
    `an apply is already running on the box since <time>; attaching, nothing
    was shipped` (the time is `svcs -o stime`) and go to step 4 with a line
-   count of 0 lines after the current run header: `watch-apply.sh` is
-   started with the line number of the last `=== run` line in the log,
-   which the runner reads with one `grep -n`. A box without the service
+   count one less than the line number of the last `=== run` line in the
+   log (read with one `grep -n`), so the header is the first line shown.
+   When the service is not running, the runner reads the log's line count
+   before starting, so only the new run is streamed and no past run is
+   replayed. A box without the service
    yet answers with an error from `svcs`; that counts as not running.
 2. rsync `host/`, `host.env`, and `authorized_keys` as today.
 3. Run `start-apply.sh` over ssh and print its line. A nonzero exit is a
    runner error with that output.
 4. Watch: run `watch-apply.sh <n>` over ssh, print each line as it
    arrives, and count the lines. Then act on the exit status:
-   - 0: print `apply complete` and exit 0.
+   - 0: exit 0. The method's own `apply complete` line was the last line
+     streamed, so the runner adds nothing.
    - 1: take `<step>` and `<N>` from the last `step ... failed with
      status` line seen, print `step <step> failed with status <N>` to
      stderr, and exit with `<N>` as today. The step's own output was
@@ -175,10 +186,11 @@ then returned") becomes `wait_for_reboot`. The new `apply`:
      Otherwise call `unreachable`.
    - Anything else: die with `watch-apply.sh exited <status>; the log is
      /var/log/homicron/apply.log on the box`.
-5. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) bounds the whole watch
-   from step 3, using the injectable clock the reboot wait already uses. On
-   expiry the runner dies with `apply still running after <N>s; rejoin with
-   homicron apply <name>` and exit 1. The method on the box continues.
+   - 4: die with `apply still running after <N>s; rejoin with homicron
+     apply <name>` and exit 1. The method on the box continues.
+5. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) is the MAX the runner
+   passes to `watch-apply.sh`, so the bound lives on the box, where a
+   blocking ssh cannot be interrupted by the runner's own clock.
 
 Ctrl-C on the runner kills the ssh and the runner; the method continues.
 The next `apply` finds it running and attaches. This is the documented way
