@@ -29,6 +29,10 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
    pfexec ~/src/voxel/target/release/voxel image create && pfexec ~/src/voxel/target/release/voxel image create-frr proto
    ```
 
+## Known issue: Linux guests freeze under voxel
+
+Current Helios advertises a viona feature that the propolis behind voxel's pinned falcon mishandles ([falcon issue 383](https://github.com/oxidecomputer/falcon/issues/383)). A Linux guest with a NIC freezes when it brings the NIC up, and `voxel image create-frr` stops at the Debian builder's login with `timeout waiting for data`. Step 65 sets `viona:viona_feat_disable_mask=0x20000000` in `/etc/system` and in the running kernel. The step logs a warning when the voxel checkout is not at the commit the workaround was validated on. Once voxel pins a falcon whose propolis is at or past commit `6588611`, remove the line and the step.
+
 ## Add a mirror disk later
 
 Start with one disk and convert the root pool to a mirror while the machine runs.
@@ -47,7 +51,7 @@ Confirm by booting once with the first disk detached. The pool reports DEGRADED 
 |---|---|---|
 | `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with the keys from `HOMICRON_KEYS_URL`, the first-boot service, the DNS hook, the ramdisk's resolv.conf, and `/etc/homicron.conf` |
 | `firstboot/` | first boot, once | DHCP on every physical NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the address, disable itself |
-| `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, `voxel.toml` |
+| `host/NN-*.sh` | over ssh, as root | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, `voxel.toml` |
 
 ## Rehearse in a VM
 
