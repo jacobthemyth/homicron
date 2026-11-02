@@ -332,6 +332,17 @@ EOS
   grep -qx 'FALCON_DATASET=' "$BATS_TEST_TMPDIR/sent.env"
 }
 
+@test "ships the rack variables with their defaults" {
+  capture_sent
+  MGMT_LINKS=igb1 run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  grep -qx 'VOXEL_EXTERNAL_MODE=lan' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'VOXEL_EXTERNAL_UPLINK=' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'VOXEL_CP_IMAGE=' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'MGMT_LINKS=igb1' "$BATS_TEST_TMPDIR/sent.env"
+  grep -qx 'VOXEL_RACK=yes' "$BATS_TEST_TMPDIR/sent.env"
+}
+
 @test "malformed hosts lines exit 2 with the line number before rsync" {
   for bad in '  HOMICRON_UID=501' 'export HOMICRON_ADDR=box.lan' 'HOMICRON_ADDR' 'HOMICRON_ADDR=box.lan # lab' 'HOMICRON_PORT="2222"' $'HOMICRON_PORT=2222\r' 'HOMICRON_ADDR=box;reboot' 'VOXEL_REF=main|true' 'FALCON_DATASET=~/falcon'; do
     printf 'HOMICRON_USER=vmuser\nHOMICRON_UID=501\n%s\n' "$bad" > "$REPO/hosts/bad.env"

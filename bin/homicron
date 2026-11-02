@@ -38,7 +38,8 @@ apply_timeout=${HOMICRON_APPLY_TIMEOUT:-7200}
 # The variables a hosts file may set and host.env always carries. load_host
 # refuses any other key, so a typo cannot fall back to a default in silence.
 host_vars=(HOMICRON_USER HOMICRON_UID HOMICRON_ADDR HOMICRON_PORT SWAP_SIZE DUMP_SIZE
-           FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB)
+           FALCON_DATASET VOXEL_REF VOXEL_SLEDS VOXEL_SLED_MEMORY_GB
+           VOXEL_EXTERNAL_MODE VOXEL_EXTERNAL_UPLINK VOXEL_CP_IMAGE MGMT_LINKS VOXEL_RACK)
 # Accepted in the hosts file and the environment like the others, but used
 # by the runner only and never shipped in host.env.
 runner_vars=(HOMICRON_KEYS)
@@ -191,6 +192,11 @@ load_host() {
   export VOXEL_REF=${VOXEL_REF:-main}
   export VOXEL_SLEDS=${VOXEL_SLEDS:-4}
   export VOXEL_SLED_MEMORY_GB=${VOXEL_SLED_MEMORY_GB:-8}
+  export VOXEL_EXTERNAL_MODE=${VOXEL_EXTERNAL_MODE:-lan}
+  export VOXEL_EXTERNAL_UPLINK=${VOXEL_EXTERNAL_UPLINK-}
+  export VOXEL_CP_IMAGE=${VOXEL_CP_IMAGE-}
+  export MGMT_LINKS=${MGMT_LINKS-}
+  export VOXEL_RACK=${VOXEL_RACK:-yes}
 
   ssh_opts=(-p "$HOMICRON_PORT" -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3)
 }

@@ -25,6 +25,15 @@ is the one tracked exception.
 | `VOXEL_REF` | no | `main` | Git ref of oxidecomputer/voxel to build. |
 | `VOXEL_SLEDS` | no | `4` | `topology.sleds` in voxel.toml. |
 | `VOXEL_SLED_MEMORY_GB` | no | `8` | `topology.sled_memory_gb` in voxel.toml. |
+| `VOXEL_EXTERNAL_MODE` | no | `lan` | `external.mode` in voxel.toml: `lan` attaches the rack's external NICs to the host's default-route link, `isolated` builds the segment on the host with NAT. |
+| `VOXEL_EXTERNAL_UPLINK` | in isolated mode | empty | `external.uplink`: the up physical link the isolated segment NATs out of. |
+| `VOXEL_CP_IMAGE` | no | empty | `image.cp` in voxel.toml. Empty selects the one `voxel-cp-*` image under the falcon dataset. |
+| `MGMT_LINKS` | no | empty | Comma-separated links whose DHCP lease must not install a default route, for a management port beside the uplink on one LAN. |
+| `VOXEL_RACK` | no | `yes` | `yes` enables the rack service `site/voxel-rack`, which destroys and relaunches the rack at every boot. `no` disables it. |
+
+A link removed from `MGMT_LINKS` keeps its line in `/etc/default/dhcpagent`
+until a person deletes it. `VOXEL_RACK=no` disables the service, and that
+destroys a running rack.
 
 A URL that holds `?`, `=`, or `&` breaks the value rule above, so pass it
 in the environment: `HOMICRON_KEYS=<url> bin/homicron apply <name>`.
