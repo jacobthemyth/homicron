@@ -23,6 +23,22 @@ homicron installs [Helios](https://github.com/oxidecomputer/helios), Oxide's ill
 
    `apply` ships the public keys of this workstation (`~/.ssh/*.pub`) to root and to the new login. A hosts file that sets `HOMICRON_KEYS` replaces that default, and the login and uid default to this workstation's. The runner rsyncs `host/` to the machine and starts the SMF service `site/homicron-apply`, which runs each step in order on the machine itself and ends with the voxel image build (30 to 45 minutes); the output streams to your terminal. The service, not the runner, owns the run: Ctrl-C or a dropped connection leaves it going on the machine, and the same `apply` command rejoins it. A step that updates the operating system reboots the machine; the runner waits and reconnects. A failed step leaves the service in `maintenance` with the step's output in the stream; fix the cause and run `apply` again, which clears the service and reruns the steps, each skipping itself when already done.
 
+   When `apply complete` prints, the rack launches under the SMF service `site/voxel-rack`, which takes about ten minutes. The service destroys and relaunches the rack after every boot, so the rack comes back empty: voxel has no way to resume a rack, and a plain `voxel launch` on the surviving disks fails in rack setup. The console is `https://recovery.sys.rack1.oxide.test`, over HTTPS with a self-signed certificate that voxel supplies, with login `recovery` and password `oxide`. Your workstation needs a route through the machine and a hosts entry for one of the Nexus addresses that the rack's DNS returns:
+
+   ```
+   sudo route add -net 198.51.100.0/24 <machine-address>
+   dig +short @198.51.100.20 recovery.sys.rack1.oxide.test A
+   printf '<one-nexus-address> recovery.sys.rack1.oxide.test\n' | sudo tee -a /etc/hosts
+   ```
+
+   If the launch fails, `svcs -xv site/voxel-rack` names the state and `/var/log/voxel-rack.log` holds voxel's output. `svcadm clear site/voxel-rack` retries. `svcadm disable site/voxel-rack` destroys the rack and `svcadm restart site/voxel-rack` rebuilds it. A `pfexec voxel destroy` by hand leaves the service online with no rack, so use `svcadm` for the rack's lifecycle. The service waits for `site/homicron-apply` to be online, so a rack never launches while an apply runs. To recreate rack content after each launch, put an executable `~/.config/voxel/post-launch.sh` on the machine. It runs as your login after every successful launch against an empty rack, and its exit status is logged but never fails the service. For example, with an [Oxide CLI](https://github.com/oxidecomputer/oxide.rs) token in `OXIDE_TOKEN`:
+
+   ```
+   #!/bin/bash
+   export OXIDE_HOST=https://recovery.sys.rack1.oxide.test OXIDE_TOKEN=<token>
+   oxide --insecure project create --name lab --description "created by post-launch.sh"
+   ```
+
 ## Known issue: Linux guests freeze under voxel
 
 Current Helios advertises a viona feature that the propolis behind voxel's pinned falcon mishandles ([falcon issue 383](https://github.com/oxidecomputer/falcon/issues/383)). A Linux guest with a NIC freezes when it brings the NIC up, and `voxel image create-frr` stops at the Debian builder's login with `timeout waiting for data`. Step 65 adds `set viona:viona_feat_disable_mask=0x20000000` to `/etc/system`, which the kernel reads at the next boot, and sets the same value in the running kernel now, loading the viona module first when no VM has loaded it yet. The step logs a warning when the voxel checkout is not at the commit the workaround was validated on. Once voxel pins a falcon whose propolis is at or past commit `6588611`, remove the line and the step.
@@ -45,7 +61,7 @@ Confirm by booting once with the first disk detached. The pool reports DEGRADED 
 |---|---|---|
 | `install/install.sh` | installer ramdisk | verifies every fetched file against `SHA256SUMS`, runs `install-helios`, seeds `/a` with the keys from `HOMICRON_KEYS_URL`, the first-boot service, the DNS hook, the ramdisk's resolv.conf, and `/etc/homicron.conf` |
 | `firstboot/` | first boot, once | DHCP and IPv6 autoconfiguration on every cabled NIC with a dhcpagent hook for DNS, enable sshd and mDNS, print the addresses, disable itself |
-| `host/NN-*.sh` | on the machine, as the SMF service `site/homicron-apply` | user and privileges, swap and dump zvols, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, `voxel.toml`, the voxel images |
+| `host/NN-*.sh` | on the machine, as the SMF service `site/homicron-apply` | user and privileges, swap and dump zvols, the network layout and chrony, `pkg update` and build tools, rustup, the falcon dataset, the voxel build, the viona workaround, the voxel images, the `voxel.toml` keys, the propolis binary, the rack service |
 
 ## Rehearse in a VM
 
@@ -114,3 +130,5 @@ test/run-tests.sh   bats tests; target commands are faked on PATH
 CI runs both on every push and deploys the site from `main` with `pages/build-site.sh`.
 
 On the machine, `host/apply.sh` is the start method of `site/homicron-apply` and runs the steps; `host/start-apply.sh` imports `host/homicron-apply.xml` and starts a run; `host/watch-apply.sh` streams the log to the runner. The log is `/var/homicron/apply.log`, on its own dataset `rpool/homicron` so it survives the boot environment switch of an OS update, with one file per step under `/var/log/homicron`. `HOMICRON_APPLY_TIMEOUT` (default 7200 seconds) bounds how long one `apply` watches before telling you to rejoin. Use `svcadm` and `svcs` on the service rather than running `apply.sh` by hand.
+
+The rack itself runs under `site/voxel-rack`: `host/voxel-rack.xml` is its manifest, installed by step 90, and `host/voxel-rack-start.sh` and `host/voxel-rack-stop.sh` are its methods, which destroy and launch the rack as your login through `pfexec`. The service depends on `site/homicron-apply` being online, so the rack waits for an apply to finish. Its log is `/var/log/voxel-rack.log`.
