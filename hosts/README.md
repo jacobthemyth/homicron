@@ -17,7 +17,7 @@ is the one tracked exception.
 | `HOMICRON_USER` | no | the workstation login (`id -un`) | Login to create on the host. |
 | `HOMICRON_UID` | no | the workstation uid (`id -u`) | Numeric uid for that login. Files that move between the two machines keep their numeric owner, so a matching uid keeps that owner readable on both sides. |
 | `HOMICRON_KEYS` | no | every `~/.ssh/*.pub` on the workstation | Public keys for root and the login, as a URL or a file path. A relative path resolves from the directory `apply` runs in. Runner-only, never shipped to the host. |
-| `HOMICRON_ADDR` | no | `<name>.local` | ssh target. Pass private names in the environment. |
+| `HOMICRON_ADDR` | no | `<name>.local` | ssh target. Pass private names in the environment. When an apply is already running on the host, `apply` attaches to it and ships nothing. |
 | `HOMICRON_PORT` | no | `22` | ssh port. The qemu test VM forwards a high port. |
 | `SWAP_SIZE` | no | `16G` | Size of the `rpool/swap` zvol. Used only when the zvol is created; changing it later does nothing. |
 | `DUMP_SIZE` | no | `16G` | Size of the `rpool/dump` zvol. Used only when the zvol is created; changing it later does nothing. |
