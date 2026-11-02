@@ -47,7 +47,7 @@ setup() {
   printf '#!/bin/bash\nexit 10\n' > "$HOMICRON_DIR/10-a.sh"
   run "$HOMICRON_DIR/apply.sh"
   [[ "$(tail -1 "$LOG")" == "rebooting for 10-a.sh" ]]
-  [ "$(fake_calls | grep -c '^reboot ?$')" -eq 1 ]
+  [ "$(fake_calls | grep -Ec '^reboot ?$')" -eq 1 ]
   [[ "$(cat "$HOMICRON_STATE_DIR/apply-requested")" == "1000 10-a.sh" ]]
   ! grep -q '^==> 20-b.sh' "$LOG"
 }
