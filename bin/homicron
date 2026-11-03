@@ -255,10 +255,12 @@ service_state() {
   fi
 }
 
-# Lines in apply.log now, so only the new run is streamed.
+# Lines in apply.log now, so only the new run is streamed. The group
+# silences the shell's own complaint when the file does not exist yet, as
+# on the first apply; a redirection on wc alone would not.
 log_lines() {
   local n
-  n=$(remote "wc -l < $remote_log 2>/dev/null || echo 0") || n=0
+  n=$(remote "{ wc -l < $remote_log; } 2>/dev/null || echo 0") || n=0
   n=${n// /}
   printf '%s\n' "${n:-0}"
 }

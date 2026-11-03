@@ -467,3 +467,18 @@ EOS
   [[ "$output" == *"line 2 is not a public key"* ]]
   refute_called '^rsync'
 }
+
+# The first apply on a fresh box: apply.log does not exist yet, and the
+# line count the runner asks the box for must be 0 with no bash complaint
+# about the missing file. The command is run through a real bash here.
+@test "counting log lines on a box without apply.log is silent" {
+  box_fake
+  run "$REPO/bin/homicron" apply box
+  [ "$status" -eq 0 ]
+  cmd=$(grep 'wc -l' "$FAKE_LOG" | head -1 | sed 's/^ssh .*root@[^ ]* //')
+  [ -n "$cmd" ]
+  [ ! -e /var/homicron/apply.log ]
+  run bash -c "$cmd"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
