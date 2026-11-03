@@ -17,6 +17,8 @@ set -o errexit -o pipefail -o nounset
 source "$(dirname "$0")/lib.sh"
 
 defaults=${HOMICRON_DHCPAGENT_DEFAULTS:-/etc/default/dhcpagent}
+# Seconds to wait for chrony to come online after svcadm enable.
+chrony_wait=${HOMICRON_CHRONY_WAIT:-30}
 
 # The management links, one per line, with empty elements dropped.
 links() {
@@ -35,6 +37,22 @@ has_line() {
 
 chrony_online() {
   [[ $(svcs -H -o state chrony 2>/dev/null) == online ]]
+}
+
+# Not `svcadm enable -s`: chrony's manifest has exclude_all dependencies on
+# svc:/network/ntp:default and open-vm-tools, which Helios does not ship.
+# startd counts an absent exclude_all as satisfied and starts chrony, but
+# svcadm's own check (synch.c, fmri_has_potential) counts it as unsatisfiable
+# and -s exits 4 with "has unsatisfied dependencies" while chrony comes
+# online. So enable without -s and wait for online here.
+wait_for_chrony() {
+  local i
+  for (( i = 0; i < chrony_wait * 4; i++ )); do
+    chrony_online && return 0
+    sleep 0.25
+  done
+  log "chrony is not online after ${chrony_wait}s; see svcs -xv chrony"
+  return 1
 }
 
 # The gateway of a default route whose interface is the link, if any.
@@ -69,7 +87,8 @@ apply() {
   local link gateway
   if ! chrony_online; then
     log "enabling chrony"
-    svcadm enable -s chrony
+    svcadm enable chrony
+    wait_for_chrony
   fi
   for link in $(links); do
     if ! has_line "$link"; then

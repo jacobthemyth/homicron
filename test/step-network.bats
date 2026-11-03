@@ -25,12 +25,36 @@ setup() {
   refute_called '^ipadm'
 }
 
-@test "enables chrony when it is not online" {
+# svcadm enable -s is never used: on Helios it exits 4 with "unsatisfied
+# dependencies" for chrony although chrony comes online (see the step).
+@test "enables chrony without -s when it is not online" {
   echo disabled > "$BATS_TEST_TMPDIR/chrony-state"
   printf 'echo online > "%s"\n' "$BATS_TEST_TMPDIR/chrony-state" > "$FAKE_BIN/svcadm.script"
   run "$STEP"
   [ "$status" -eq 0 ]
-  assert_called '^svcadm enable -s chrony$'
+  assert_called '^svcadm enable chrony$'
+  refute_called '^svcadm enable -s'
+}
+
+@test "waits for chrony to come online after svcadm enable returns" {
+  # svcs answers disabled, then offline twice, then online: startd is slow.
+  echo disabled > "$BATS_TEST_TMPDIR/chrony-state"
+  printf 'n=$(cat "%s" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "%s"
+if (( n == 1 )); then echo disabled; elif (( n < 4 )); then echo offline; else echo online; fi\n' \
+    "$BATS_TEST_TMPDIR/svcs-calls" "$BATS_TEST_TMPDIR/svcs-calls" > "$FAKE_BIN/svcs.script"
+  run "$STEP"
+  [ "$status" -eq 0 ]
+  assert_called '^svcadm enable chrony$'
+  [ "$(cat "$BATS_TEST_TMPDIR/svcs-calls")" -ge 4 ]
+  [[ "$output" == *"homicron: done"* ]]
+}
+
+@test "chrony that never comes online fails the step and names the wait" {
+  echo disabled > "$BATS_TEST_TMPDIR/chrony-state"
+  HOMICRON_CHRONY_WAIT=1 run "$STEP"
+  [ "$status" -eq 1 ]
+  assert_called '^svcadm enable chrony$'
+  [[ "$output" == *"chrony is not online after 1s"* ]]
 }
 
 @test "appends one line per management link and recycles each lease once" {
