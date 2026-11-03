@@ -32,6 +32,8 @@ marker="$state_dir/apply-requested"
 log="$state_dir/apply.log"
 smf_exit_err_fatal=95
 smf_exit_err_config=96
+# Seconds to wait for a default route before the first step.
+network_wait=${HOMICRON_NETWORK_WAIT:-120}
 
 say() {
   printf '%s\n' "$*" >> "$log"
@@ -39,6 +41,28 @@ say() {
 
 boot_time() {
   kstat -p unix:0:system_misc:boot_time 2>/dev/null | awk '{ print $2 }'
+}
+
+has_default_route() {
+  netstat -rn -f inet 2>/dev/null | awk '$1 == "default" { found = 1 } END { exit !found }'
+}
+
+# After a reboot startd runs this method as soon as multi-user-server is
+# online, and on a box whose uplink lease was requested with wait 0 that is
+# seconds before any DHCP lease is bound: no address, no default route, no
+# name resolution, and the first step that reaches out fails. The steps
+# need the network, so wait for the uplink's lease, which is the default
+# route. Past the wait the steps run anyway and the one that needs the
+# network says what is wrong.
+wait_for_network() {
+  local i
+  has_default_route && return 0
+  say "waiting for a default route (the DHCP lease on the uplink)"
+  for (( i = 0; i < network_wait; i++ )); do
+    sleep 1
+    has_default_route && return 0
+  done
+  say "no default route after ${network_wait}s; running the steps anyway"
 }
 
 [[ -e $marker ]] || exit 0
@@ -64,6 +88,8 @@ if [[ -n $now_boot && $marker_boot != "$now_boot" ]]; then
   header+=" (resumed after reboot)"
 fi
 say "$header"
+
+wait_for_network
 
 for path in "$dir"/[0-9][0-9]-*.sh; do
   step=$(basename "$path")

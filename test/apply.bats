@@ -11,6 +11,11 @@ setup() {
   make_fake kstat 0 $'unix:0:system_misc:boot_time\t1000'
   make_fake reboot
   make_fake sleep
+  # The routing table: a default route is there unless a test says otherwise.
+  export ROUTES="$BATS_TEST_TMPDIR/routes"
+  printf 'default              10.0.2.2             UG        2          0 rge0\n' > "$ROUTES"
+  make_fake netstat
+  printf 'cat "$ROUTES"\n' > "$FAKE_BIN/netstat.script"
   printf '1000\n' > "$HOMICRON_STATE_DIR/apply-requested"
   LOG="$HOMICRON_STATE_DIR/apply.log"
 }
@@ -76,4 +81,36 @@ setup() {
   run "$HOMICRON_DIR/apply.sh"
   [ "$status" -eq 96 ]
   grep -q 'host.env' "$LOG"
+}
+
+# After a reboot the service starts as soon as multi-user-server is online,
+# which on a box whose uplink lease has wait 0 is before any DHCP lease is
+# bound. The steps need the network, so the loop waits for a default route.
+@test "a default route present: no wait before the first step" {
+  run "$HOMICRON_DIR/apply.sh"
+  [ "$status" -eq 0 ]
+  refute_called '^sleep 1$'
+  ! grep -q 'default route' "$LOG"
+}
+
+@test "waits for a default route before the first step" {
+  : > "$ROUTES"
+  # The third netstat call sees the route land.
+  printf 'n=$(grep -c "^netstat" "$FAKE_LOG"); if (( n >= 3 )); then echo "default 10.0.2.2 UG 2 0 rge0"; fi\n' > "$FAKE_BIN/netstat.script"
+  run "$HOMICRON_DIR/apply.sh"
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c '^sleep 1$')" -eq 2 ]
+  grep -q '^waiting for a default route' "$LOG"
+  # the wait precedes the first step
+  [ "$(grep -n 'default route\|^==> 10-a.sh' "$LOG" | head -1)" != "$(grep -n '^==> 10-a.sh' "$LOG")" ]
+  [[ "$(tail -1 "$LOG")" == "apply complete" ]]
+}
+
+@test "no default route after the wait: says so and runs the steps anyway" {
+  : > "$ROUTES"
+  HOMICRON_NETWORK_WAIT=3 run "$HOMICRON_DIR/apply.sh"
+  [ "$status" -eq 0 ]
+  [ "$(fake_calls | grep -c '^sleep 1$')" -eq 3 ]
+  grep -q '^no default route after 3s; running the steps anyway' "$LOG"
+  grep -q '^==> 10-a.sh' "$LOG"
 }
